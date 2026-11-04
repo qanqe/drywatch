@@ -121,7 +121,13 @@ function Remove-Dir($p) {
 
 if (-not $SkipClean) {
   Step "Deleting stale build folders"
-  $dirs = @("$android\build", "$android\app\build", "$android\.gradle")
+  $dirs = @(
+    "$android\build",
+    "$android\app\build",
+    "$android\.gradle",
+    "$ProjectRoot\node_modules\@react-native\gradle-plugin\shared\build",
+    "$ProjectRoot\node_modules\@react-native\gradle-plugin\build"
+  )
   $dirs += @(Get-ChildItem "$ProjectRoot\node_modules\*\android\build"   -Directory -ErrorAction SilentlyContinue | ForEach-Object FullName)
   $dirs += @(Get-ChildItem "$ProjectRoot\node_modules\@*\*\android\build" -Directory -ErrorAction SilentlyContinue | ForEach-Object FullName)
 

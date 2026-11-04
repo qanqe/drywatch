@@ -16,6 +16,16 @@ class ProcessingControlModule(private val reactContext: ReactApplicationContext)
 
   companion object {
     const val NAME = "DryWatchProcessingControl"
+    const val NOTIFICATION_PERMISSION_REQUEST = 8123
+
+    @Volatile
+    var pendingPermissionPromise: Promise? = null
+
+    fun onPermissionResult(granted: Boolean) {
+      val promise = pendingPermissionPromise
+      pendingPermissionPromise = null
+      promise?.resolve(granted)
+    }
   }
 
   override fun getName() = NAME
@@ -71,7 +81,7 @@ class ProcessingControlModule(private val reactContext: ReactApplicationContext)
       promise.resolve(true)
       return
     }
-    val activity = currentActivity
+    val activity = getCurrentActivity()
     if (activity == null) {
       promise.reject("NO_ACTIVITY", "No foreground activity to show the permission dialog.")
       return
@@ -84,25 +94,13 @@ class ProcessingControlModule(private val reactContext: ReactApplicationContext)
       promise.resolve(true)
       return
     }
-    // Store the promise; MainActivity delivers the result via onActivityResult.
+    // Store the promise; MainActivity delivers the result via
+    // onRequestPermissionsResult.
     pendingPermissionPromise = promise
     androidx.core.app.ActivityCompat.requestPermissions(
       activity,
       arrayOf(Manifest.permission.POST_NOTIFICATIONS),
       NOTIFICATION_PERMISSION_REQUEST,
     )
-  }
-
-  companion object PermissionHook {
-    const val NOTIFICATION_PERMISSION_REQUEST = 8123
-
-    @Volatile
-    var pendingPermissionPromise: com.facebook.react.bridge.Promise? = null
-
-    fun onPermissionResult(granted: Boolean) {
-      val promise = pendingPermissionPromise
-      pendingPermissionPromise = null
-      promise?.resolve(granted)
-    }
   }
 }
