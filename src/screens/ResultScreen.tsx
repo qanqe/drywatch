@@ -1,5 +1,6 @@
 import React, {useState} from 'react';
-import {Pressable, StatusBar, StyleSheet, Text, View} from 'react-native';
+import {Pressable, ScrollView, StatusBar, StyleSheet, Text, View} from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
 import {colors, type, spacing} from '../design/tokens';
 import {
   copyToClipboard,
@@ -32,7 +33,7 @@ function Result({videoName, document, onDone}: ResultProps) {
   };
 
   return (
-    <View style={styles.root}>
+    <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
       <StatusBar barStyle="dark-content" />
       <View style={styles.column}>
         <View style={styles.header}>
@@ -40,7 +41,10 @@ function Result({videoName, document, onDone}: ResultProps) {
           <Text style={styles.stage}>review</Text>
         </View>
 
-        <View style={styles.body}>
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={true}>
           <Text style={styles.title}>Your context note.</Text>
           <Text style={styles.videoName} numberOfLines={1}>
             {videoName}
@@ -101,7 +105,7 @@ function Result({videoName, document, onDone}: ResultProps) {
             extracted” (captions, TikTok subtitles, on-screen text) are wired
             to their engines in later updates of v0.0.4.
           </Text>
-        </View>
+        </ScrollView>
 
         <View style={styles.footer}>
           <Pressable
@@ -115,7 +119,7 @@ function Result({videoName, document, onDone}: ResultProps) {
           </Pressable>
         </View>
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -131,16 +135,18 @@ const styles = StyleSheet.create({
     borderLeftColor: colors.hairlineSoft,
     borderRightColor: colors.hairlineSoft,
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    paddingTop: spacing.md,
+    paddingBottom: spacing.sm,
   },
   wordmark: {...type.heading, color: colors.primary},
   stage: {...type.label, color: colors.textMuted},
-  body: {marginTop: spacing.xxxl, flex: 1},
+  scroll: {flex: 1},
+  scrollContent: {paddingTop: spacing.xl, paddingBottom: spacing.xl},
   title: {...type.display, color: colors.primary},
   videoName: {
     ...type.body,

@@ -77,7 +77,7 @@ test('shows the two ways to start building video context', async () => {
     .map(node => node.props.children);
   expect(text).toContain('A TikTok link');
   expect(text).toContain('A saved video');
-  expect(text).toContain('Whisper small · on-device goal');
+  expect(text).toContain('Whisper tiny · on-device');
 });
 
 test('builds a context document with labeled source sections', async () => {

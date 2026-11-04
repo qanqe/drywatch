@@ -1,5 +1,6 @@
 import React, {useEffect, useRef, useState} from 'react';
-import {Pressable, StatusBar, StyleSheet, Text, View} from 'react-native';
+import {Pressable, ScrollView, StatusBar, StyleSheet, Text, View} from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
 import {colors, type, spacing} from '../design/tokens';
 import {
   extractAudioToWav,
@@ -234,7 +235,7 @@ function Processing({
   }, [videoUri, videoName, sourceUrl, onComplete]);
 
   return (
-    <View style={styles.root}>
+    <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
       <StatusBar barStyle="dark-content" />
       <View style={styles.column}>
         <View style={styles.header}>
@@ -242,7 +243,10 @@ function Processing({
           <Text style={styles.stage}>processing</Text>
         </View>
 
-        <View style={styles.body}>
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.body}
+          showsVerticalScrollIndicator={true}>
           <Text style={styles.title}>Working on your video.</Text>
           <Text style={styles.videoName} numberOfLines={1}>
             {videoName}
@@ -280,7 +284,7 @@ function Processing({
             TikTok subtitle, and on-screen text extraction is being connected
             through v0.0.4 updates.
           </Text>
-        </View>
+        </ScrollView>
 
         <View style={styles.footer}>
           <Pressable
@@ -294,7 +298,7 @@ function Processing({
           </Pressable>
         </View>
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -330,16 +334,18 @@ const styles = StyleSheet.create({
     borderLeftColor: colors.hairlineSoft,
     borderRightColor: colors.hairlineSoft,
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    paddingTop: spacing.md,
+    paddingBottom: spacing.sm,
   },
+  scroll: {flex: 1},
   wordmark: {...type.heading, color: colors.primary},
   stage: {...type.label, color: colors.textMuted},
-  body: {marginTop: spacing.xxxl * 1.5, flex: 1},
+  body: {paddingTop: spacing.xl, paddingBottom: spacing.xl},
   title: {...type.display, color: colors.primary},
   videoName: {
     ...type.body,

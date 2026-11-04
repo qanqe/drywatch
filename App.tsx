@@ -1,4 +1,5 @@
 import React, {useCallback, useEffect, useRef, useState} from 'react';
+import RNFS from 'react-native-fs';
 import {
   BackHandler,
   Pressable,
@@ -8,6 +9,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
 import {
   pick as pickDocument,
   types as documentTypes,
@@ -24,8 +26,11 @@ import {
 import {parseVtt, formatCueTime} from './src/context/vtt';
 import ProcessingScreen from './src/screens/ProcessingScreen';
 import ResultScreen from './src/screens/ResultScreen';
+import OnboardingScreen from './src/screens/OnboardingScreen';
 
 type Route = 'home' | 'processing' | 'result';
+
+const ONBOARDING_FLAG = 'drywatch-onboarding-seen';
 
 interface PickedVideo {
   name: string;
@@ -50,7 +55,35 @@ function App() {
   const [result, setResult] = useState<ProcessedResult | null>(null);
   const [retrieving, setRetrieving] = useState(false);
   const [subtitles, setSubtitles] = useState<SubtitleContent | null>(null);
+  const [showOnboarding, setShowOnboarding] = useState<boolean | null>(null);
   const resultCount = useRef(0);
+
+  // First session: show onboarding once, flag it in app documents storage.
+  useEffect(() => {
+    const checkOnboarding = async () => {
+      try {
+        const flagPath = `${RNFS.DocumentDirectoryPath}/${ONBOARDING_FLAG}`;
+        const seen = await RNFS.exists(flagPath);
+        setShowOnboarding(!seen);
+      } catch {
+        setShowOnboarding(false); // storage failure: skip onboarding, not break
+      }
+    };
+    checkOnboarding();
+  }, []);
+
+  const completeOnboarding = useCallback(async () => {
+    setShowOnboarding(false);
+    try {
+      await RNFS.writeFile(
+        `${RNFS.DocumentDirectoryPath}/${ONBOARDING_FLAG}`,
+        'seen',
+        'utf8',
+      );
+    } catch {
+      // Flag write failed: onboarding may show again next launch. Non-fatal.
+    }
+  }, []);
 
   // Poll for a TikTok link shared into the app (share sheet, cold or warm).
   useEffect(() => {
@@ -218,13 +251,17 @@ function App() {
     );
   }
 
+  if (showOnboarding !== false) {
+    return <OnboardingScreen onContinue={completeOnboarding} />;
+  }
+
   return (
-    <View style={styles.root}>
+    <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
       <StatusBar barStyle="dark-content" />
       <View style={styles.column}>
         <View style={styles.header}>
           <Text style={styles.wordmark}>DryWatch</Text>
-          <Text style={styles.version}>v0.0.3</Text>
+          <Text style={styles.version}>v0.0.4</Text>
         </View>
 
         <View style={styles.intro}>
@@ -293,11 +330,11 @@ function App() {
         {message ? <Text style={styles.message}>{message}</Text> : null}
 
         <View style={styles.footer}>
-          <Text style={styles.footerText}>Whisper small · on-device goal</Text>
-          <Text style={styles.footerText}>v0.0.3</Text>
+          <Text style={styles.footerText}>Whisper tiny · on-device</Text>
+          <Text style={styles.footerText}>v0.0.4</Text>
         </View>
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -313,12 +350,13 @@ const styles = StyleSheet.create({
     borderLeftColor: colors.hairlineSoft,
     borderRightColor: colors.hairlineSoft,
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    paddingTop: spacing.md,
+    paddingBottom: spacing.sm,
   },
   wordmark: {...type.heading, color: colors.primary},
   version: {...type.caption, color: colors.textSecondary},
