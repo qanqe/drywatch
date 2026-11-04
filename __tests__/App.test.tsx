@@ -18,6 +18,27 @@ jest.mock('@react-native-documents/picker', () => ({
   keepLocalCopy: jest.fn(),
 }));
 
+jest.mock('whisper.rn', () => ({
+  initWhisper: jest.fn(async () => ({
+    transcribe: jest.fn(() => ({
+      stop: jest.fn(async () => {}),
+      promise: Promise.resolve({result: 'hello test', segments: []}),
+    })),
+    release: jest.fn(async () => {}),
+  })),
+  releaseAllWhisper: jest.fn(async () => {}),
+}));
+
+jest.mock('react-native-fs', () => ({
+  DocumentDirectoryPath: '/mock/docs',
+  downloadFile: jest.fn(() => ({promise: Promise.resolve({statusCode: 200})})),
+  exists: jest.fn(async () => true),
+  mkdir: jest.fn(async () => {}),
+  moveFile: jest.fn(async () => {}),
+  stat: jest.fn(async () => ({isFile: () => true, size: '100'})),
+  unlink: jest.fn(async () => {}),
+}));
+
 beforeAll(() => {
   const {NativeModules} = jest.requireActual('react-native');
   Object.assign(NativeModules, {
@@ -37,6 +58,9 @@ beforeAll(() => {
       copyToClipboard: jest.fn(async () => true),
       saveTextFile: jest.fn(async () => '/mock/path.md'),
       shareTextFile: jest.fn(async () => '/mock/path.md'),
+    },
+    DryWatchAudioExtractor: {
+      extractToWav: jest.fn(async () => '/mock/audio.wav'),
     },
   });
 });

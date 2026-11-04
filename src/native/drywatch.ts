@@ -20,6 +20,14 @@ interface DryWatchClipboardFileNative {
   shareTextFile(baseName: string, content: string): Promise<string>;
 }
 
+interface DryWatchAudioExtractorNative {
+  extractToWav(uri: string): Promise<string>;
+}
+
+const NativeAudio = NativeModules.DryWatchAudioExtractor as
+  | DryWatchAudioExtractorNative
+  | undefined;
+
 const NativeShare = NativeModules.DryWatchShareIntent as
   | DryWatchShareIntentNative
   | undefined;
@@ -100,4 +108,13 @@ export async function shareContextFile(
     throw new Error('Share module is unavailable on this platform.');
   }
   return NativeClipboardFile.shareTextFile(baseName, content);
+}
+
+export async function extractAudioToWav(uri: string): Promise<string> {
+  if (!NativeAudio) {
+    throw new Error(
+      'Audio extraction module is unavailable on this platform.',
+    );
+  }
+  return NativeAudio.extractToWav(uri);
 }

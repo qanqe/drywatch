@@ -14,7 +14,9 @@
     "@react-native/new-app-screen": "0.88.1",
     "react": "19.3.0",
     "react-native": "0.88.1",
-    "react-native-safe-area-context": "^5.5.2"
+    "react-native-fs": "^2.20.0",
+    "react-native-safe-area-context": "^5.5.2",
+    "whisper.rn": "^0.8.0-rc.2"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
@@ -39,5 +41,8 @@
   },
   "engines": {
     "node": ">= 22.11.0"
+  },
+  "allowScripts": {
+    "whisper.rn@0.8.0-rc.2": true
   }
 }

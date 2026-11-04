@@ -13,6 +13,7 @@ class DryWatchPackage : ReactPackage {
         ShareIntentModule(reactContext),
         VideoMetaModule(reactContext),
         ClipboardFileModule(reactContext),
+        AudioExtractorModule(reactContext),
     )
   }
 

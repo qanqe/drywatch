@@ -1,7 +1,13 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {Pressable, StatusBar, StyleSheet, Text, View} from 'react-native';
 import {colors, type, spacing} from '../design/tokens';
-import {readVideoMeta, type VideoMeta} from '../native/drywatch';
+import {
+  extractAudioToWav,
+  readVideoMeta,
+  type VideoMeta,
+} from '../native/drywatch';
+import {loadModel, transcribeFile} from '../native/whisper';
+import {downloadModel, getModelStatus} from '../native/whisperModels';
 import {
   buildContextDocument,
   defaultTitle,
@@ -31,9 +37,14 @@ function Processing({
 }: ProcessingProps) {
   const [stages, setStages] = useState<StageState[]>([
     {key: 'read', label: 'Reading video', state: 'active'},
+    {key: 'audio', label: 'Extracting audio', state: 'waiting'},
+    {key: 'model', label: 'Loading tiny model', state: 'waiting'},
+    {key: 'transcribe', label: 'Whisper spike test', state: 'waiting'},
     {key: 'build', label: 'Building context document', state: 'waiting'},
   ]);
   const [error, setError] = useState('');
+  const [transcript, setTranscript] = useState('');
+  const [spikeSeconds, setSpikeSeconds] = useState<number | null>(null);
   const startedRef = useRef(false);
 
   useEffect(() => {
@@ -43,24 +54,48 @@ function Processing({
     startedRef.current = true;
 
     const run = async () => {
+      const mark = (key: string, state: StageState['state']) =>
+        setStages(prev => prev.map(s => (s.key === key ? {...s, state} : s)));
+
       let meta: VideoMeta | null = null;
       try {
         meta = await readVideoMeta(videoUri);
-        setStages(prev =>
-          prev.map(s => (s.key === 'read' ? {...s, state: 'done'} : s)),
-        );
+        mark('read', 'done');
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         setError(`Could not read this video: ${message}`);
-        setStages(prev =>
-          prev.map(s => (s.key === 'read' ? {...s, state: 'failed'} : s)),
-        );
+        mark('read', 'failed');
         return;
       }
 
-      setStages(prev =>
-        prev.map(s => (s.key === 'build' ? {...s, state: 'active'} : s)),
-      );
+      // Spike: real whisper.rn transcription test with the tiny model.
+      try {
+        mark('audio', 'active');
+        const wavPath = await extractAudioToWav(videoUri);
+        mark('audio', 'done');
+
+        mark('model', 'active');
+        const status = await getModelStatus('tiny');
+        const modelPath = status.downloaded
+          ? (status.path as string)
+          : await downloadModel('tiny');
+        await loadModel(modelPath);
+        mark('model', 'done');
+
+        mark('transcribe', 'active');
+        const startedAt = Date.now();
+        const result = await transcribeFile(wavPath);
+        const elapsedSeconds = (Date.now() - startedAt) / 1000;
+        setTranscript(result.text.trim());
+        setSpikeSeconds(elapsedSeconds);
+        mark('transcribe', 'done');
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        setError(`Whisper spike failed: ${message}`);
+        return;
+      }
+
+      mark('build', 'active');
 
       const sources: ContextSource[] = [
         {key: 'caption', label: 'Caption', status: 'not extracted', content: null},
@@ -123,6 +158,14 @@ function Processing({
           </View>
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
+
+          {transcript ? (
+            <Text style={styles.transcript}>
+              Spike transcript ({spikeSeconds !== null ? `${spikeSeconds.toFixed(1)}s` : '…'}):
+              {'\n'}
+              {transcript}
+            </Text>
+          ) : null}
 
           <Text style={styles.note}>
             Extraction (Whisper, OCR, captions) arrives in v0.0.4. What runs
@@ -198,6 +241,12 @@ const styles = StyleSheet.create({
   },
   stageLabel: {...type.body, color: colors.text},
   error: {...type.caption, color: colors.primaryDeep, marginTop: spacing.lg},
+  transcript: {
+    ...type.caption,
+    color: colors.text,
+    marginTop: spacing.lg,
+    maxWidth: 320,
+  },
   note: {
     ...type.caption,
     color: colors.textMuted,
