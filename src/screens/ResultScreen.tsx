@@ -97,9 +97,9 @@ function Result({videoName, document, onDone}: ResultProps) {
           </View>
 
           <Text style={styles.note}>
-            Extraction engine lands in v0.0.4 — every source section currently
-            reads “not extracted.” The document structure, copy, save, and
-            share are real.
+            Audio transcript is real Whisper output. Sections marked “not
+            extracted” (captions, TikTok subtitles, on-screen text) are wired
+            to their engines in later updates of v0.0.4.
           </Text>
         </View>
 

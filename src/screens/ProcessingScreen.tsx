@@ -3,7 +3,11 @@ import {Pressable, StatusBar, StyleSheet, Text, View} from 'react-native';
 import {colors, type, spacing} from '../design/tokens';
 import {
   extractAudioToWav,
+  extractOnScreenText,
   readVideoMeta,
+  startProcessingService,
+  stopProcessingService,
+  updateProcessingStage,
   type VideoMeta,
 } from '../native/drywatch';
 import {loadModel, transcribeFile} from '../native/whisper';
@@ -18,6 +22,7 @@ export interface ProcessingProps {
   videoName: string;
   videoUri: string;
   sourceUrl: string | null;
+  subtitleText: string | null;
   onComplete: (result: {document: string; meta: VideoMeta | null}) => void;
   onCancel: () => void;
 }
@@ -32,20 +37,33 @@ function Processing({
   videoName,
   videoUri,
   sourceUrl,
+  subtitleText,
   onComplete,
   onCancel,
 }: ProcessingProps) {
+  const stopAndCancel = () => {
+    stopProcessingService().catch(() => {});
+    onCancel();
+  };
   const [stages, setStages] = useState<StageState[]>([
     {key: 'read', label: 'Reading video', state: 'active'},
     {key: 'audio', label: 'Extracting audio', state: 'waiting'},
     {key: 'model', label: 'Loading tiny model', state: 'waiting'},
     {key: 'transcribe', label: 'Whisper spike test', state: 'waiting'},
+    {key: 'ocr', label: 'Reading on-screen text', state: 'waiting'},
     {key: 'build', label: 'Building context document', state: 'waiting'},
   ]);
   const [error, setError] = useState('');
   const [transcript, setTranscript] = useState('');
   const [spikeSeconds, setSpikeSeconds] = useState<number | null>(null);
   const startedRef = useRef(false);
+  const transcriptRef = useRef('');
+  const transcriptSecondsRef = useRef<number | null>(null);
+  const transcriptSegmentsRef = useRef<string>('');
+  const ocrLinesRef = useRef<string[]>([]);
+  const ocrStatusRef = useRef<'extracted' | 'no_text' | 'failed'>('failed');
+  const stagesRef = useRef<StageState[]>([]);
+  stagesRef.current = stages;
 
   useEffect(() => {
     if (startedRef.current) {
@@ -54,8 +72,24 @@ function Processing({
     startedRef.current = true;
 
     const run = async () => {
-      const mark = (key: string, state: StageState['state']) =>
+      const mark = (key: string, state: StageState['state']) => {
         setStages(prev => prev.map(s => (s.key === key ? {...s, state} : s)));
+        const stage = stagesRef.current.find(s => s.key === key);
+        if (stage) {
+          const label =
+            state === 'active'
+              ? `${stage.label}…`
+              : state === 'done'
+              ? `${stage.label} - done`
+              : state === 'failed'
+              ? `${stage.label} - failed`
+              : stage.label;
+          updateProcessingStage(label).catch(() => {});
+        }
+      };
+
+      // Foreground service keeps the notification alive if the user leaves.
+      await startProcessingService(videoName).catch(() => {});
 
       let meta: VideoMeta | null = null;
       try {
@@ -86,22 +120,92 @@ function Processing({
         const startedAt = Date.now();
         const result = await transcribeFile(wavPath);
         const elapsedSeconds = (Date.now() - startedAt) / 1000;
-        setTranscript(result.text.trim());
+        const transcriptText = result.text.trim();
+        setTranscript(transcriptText);
         setSpikeSeconds(elapsedSeconds);
         mark('transcribe', 'done');
+        transcriptRef.current = transcriptText;
+        transcriptSecondsRef.current = elapsedSeconds;
+        transcriptSegmentsRef.current = result.segments
+          .map(seg => `[${formatSegmentTime(seg.t0)}] ${seg.text}`)
+          .join('\n');
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         setError(`Whisper spike failed: ${message}`);
+        stopProcessingService().catch(() => {});
         return;
+      }
+
+      // OCR: real on-device text recognition over sampled frames.
+      // Failure here is not fatal - the note just reports it honestly.
+      try {
+        mark('ocr', 'active');
+        const ocr = await extractOnScreenText(
+          videoUri,
+          meta?.durationMs ?? 0,
+        );
+        if (ocr.status === 'ok' && ocr.lines.length > 0) {
+          ocrLinesRef.current = ocr.lines;
+          ocrStatusRef.current = 'extracted';
+        } else {
+          ocrStatusRef.current = 'no_text';
+        }
+        mark('ocr', 'done');
+      } catch {
+        ocrStatusRef.current = 'failed';
+        mark('ocr', 'done');
       }
 
       mark('build', 'active');
 
       const sources: ContextSource[] = [
         {key: 'caption', label: 'Caption', status: 'not extracted', content: null},
-        {key: 'subtitles', label: 'TikTok subtitles', status: 'not extracted', content: null},
-        {key: 'transcript', label: 'Audio transcript', status: 'not extracted', content: null},
-        {key: 'onscreen', label: 'On-screen text (OCR)', status: 'not extracted', content: null},
+        subtitleText
+          ? {
+              key: 'subtitles',
+              label: 'TikTok subtitles',
+              status: 'extracted',
+              content: subtitleText,
+            }
+          : sourceUrl
+          ? {
+              key: 'subtitles',
+              label: 'TikTok subtitles',
+              status: 'unavailable',
+              content: null,
+            }
+          : {
+              key: 'subtitles',
+              label: 'TikTok subtitles',
+              status: 'not extracted',
+              content: null,
+            },
+        {
+          key: 'transcript',
+          label: 'Audio transcript',
+          status: transcriptRef.current ? 'extracted' : 'not extracted',
+          content: transcriptSegmentsRef.current || transcriptRef.current || null,
+        },
+        ocrStatusRef.current === 'extracted'
+          ? {
+              key: 'onscreen',
+              label: 'On-screen text (OCR)',
+              status: 'extracted',
+              content: ocrLinesRef.current.join('\n'),
+            }
+          : ocrStatusRef.current === 'no_text'
+          ? {
+              key: 'onscreen',
+              label: 'On-screen text (OCR)',
+              status: 'unavailable',
+              content: null,
+            }
+          : {
+              key: 'onscreen',
+              label: 'On-screen text (OCR)',
+              status: 'not extracted',
+              content: null,
+            },
       ];
 
       const document = buildContextDocument({
@@ -115,6 +219,7 @@ function Processing({
       setStages(prev =>
         prev.map(s => (s.key === 'build' ? {...s, state: 'done'} : s)),
       );
+      stopProcessingService().catch(() => {});
 
       // Brief pause so the final "done" state is visible before switching.
       setTimeout(() => {
@@ -123,6 +228,9 @@ function Processing({
     };
 
     run();
+    // subtitleText is read once at mount alongside the other run inputs;
+    // re-running on subtitle changes would restart Whisper mid-run.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [videoUri, videoName, sourceUrl, onComplete]);
 
   return (
@@ -168,16 +276,16 @@ function Processing({
           ) : null}
 
           <Text style={styles.note}>
-            Extraction (Whisper, OCR, captions) arrives in v0.0.4. What runs
-            now is real: the video is opened, its metadata read, and the
-            context document built and saved for review.
+            The audio transcript is real on-device Whisper output. Caption,
+            TikTok subtitle, and on-screen text extraction is being connected
+            through v0.0.4 updates.
           </Text>
         </View>
 
         <View style={styles.footer}>
           <Pressable
             accessibilityRole="button"
-            onPress={onCancel}
+            onPress={stopAndCancel}
             style={({pressed}) => [
               styles.cancelButton,
               pressed && styles.pressedSurface,
@@ -196,6 +304,13 @@ const statusColor: Record<StageState['state'], string> = {
   waiting: colors.textDisabled,
   failed: colors.primaryDeep,
 };
+
+function formatSegmentTime(seconds: number): string {
+  const total = Math.floor(seconds);
+  const minutes = Math.floor(total / 60);
+  const rest = total % 60;
+  return `${minutes}:${rest.toString().padStart(2, '0')}`;
+}
 
 const stageStatusStyle = (state: StageState['state']) => ({
   ...type.label,

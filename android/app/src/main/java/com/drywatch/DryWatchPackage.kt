@@ -14,6 +14,9 @@ class DryWatchPackage : ReactPackage {
         VideoMetaModule(reactContext),
         ClipboardFileModule(reactContext),
         AudioExtractorModule(reactContext),
+        TikTokDownloadModule(reactContext),
+        OcrModule(reactContext),
+        ProcessingControlModule(reactContext),
     )
   }
 

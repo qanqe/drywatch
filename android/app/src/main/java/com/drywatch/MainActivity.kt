@@ -18,6 +18,19 @@ class MainActivity : ReactActivity() {
     ShareIntentModule.handleSharedText(intent)
   }
 
+  override fun onRequestPermissionsResult(
+      requestCode: Int,
+      permissions: Array<out String>,
+      grantResults: IntArray,
+  ) {
+    super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+    if (requestCode == ProcessingControlModule.NOTIFICATION_PERMISSION_REQUEST) {
+      ProcessingControlModule.onPermissionResult(
+          grantResults.isNotEmpty() && grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED,
+      )
+    }
+  }
+
   override fun onCreate(savedInstanceState: android.os.Bundle?) {
     super.onCreate(savedInstanceState)
     // Cold start: activity launched directly by a share action.

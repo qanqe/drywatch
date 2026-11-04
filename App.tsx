@@ -18,8 +18,10 @@ import {
 import {colors, type, spacing} from './src/design/tokens';
 import {
   consumePendingShare,
+  downloadTikTokVideo,
   type VideoMeta,
 } from './src/native/drywatch';
+import {parseVtt, formatCueTime} from './src/context/vtt';
 import ProcessingScreen from './src/screens/ProcessingScreen';
 import ResultScreen from './src/screens/ResultScreen';
 
@@ -35,6 +37,10 @@ interface ProcessedResult {
   meta: VideoMeta | null;
 }
 
+interface SubtitleContent {
+  text: string;
+}
+
 function App() {
   const [route, setRoute] = useState<Route>('home');
   const [link, setLink] = useState('');
@@ -42,6 +48,8 @@ function App() {
   const [video, setVideo] = useState<PickedVideo | null>(null);
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
   const [result, setResult] = useState<ProcessedResult | null>(null);
+  const [retrieving, setRetrieving] = useState(false);
+  const [subtitles, setSubtitles] = useState<SubtitleContent | null>(null);
   const resultCount = useRef(0);
 
   // Poll for a TikTok link shared into the app (share sheet, cold or warm).
@@ -50,19 +58,22 @@ function App() {
       const shared = await consumePendingShare();
       if (shared) {
         setLink(shared);
-        setSourceUrl(shared);
-        setMessage(
-          'Link received from share. Media retrieval will be tested next.',
-        );
+        startFromLink(shared);
       }
     }, 700);
     return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const startProcessing = useCallback(
-    (picked: PickedVideo, url: string | null) => {
+    (
+      picked: PickedVideo,
+      url: string | null,
+      subtitleContent?: SubtitleContent | null,
+    ) => {
       setVideo(picked);
       setSourceUrl(url);
+      setSubtitles(subtitleContent ?? null);
       setResult(null);
       setRoute('processing');
     },
@@ -107,15 +118,61 @@ function App() {
   }, [startProcessing]);
 
   const prepareLink = () => {
+    const trimmed = link.trim();
     const isTikTok = /^https?:\/\/(?:www\.|m\.|vm\.|vt\.)?tiktok\.com\//i.test(
-      link.trim(),
+      trimmed,
     );
-    setMessage(
-      isTikTok
-        ? 'Link received. Media retrieval will be tested next.'
-        : 'Paste a TikTok link to prepare it for processing.',
-    );
+    if (!isTikTok) {
+      setMessage('Paste a TikTok link to prepare it for processing.');
+      return;
+    }
+    startFromLink(trimmed);
   };
+
+  const startFromLink = useCallback(
+    async (postUrl: string) => {
+      setMessage('');
+      setRetrieving(true);
+      try {
+        const downloaded = await downloadTikTokVideo(postUrl);
+        let parsedSubtitles: SubtitleContent | null = null;
+        if (downloaded.subtitlePath) {
+          try {
+            const vttResponse = await fetch(
+              `file://${downloaded.subtitlePath}`,
+            );
+            const raw = await vttResponse.text();
+            const cues = parseVtt(raw);
+            if (cues.length > 0) {
+              parsedSubtitles = {
+                text: cues
+                  .map(cue => `[${formatCueTime(cue.startSeconds)}] ${cue.text}`)
+                  .join('\n'),
+              };
+            }
+          } catch {
+            // Subtitle file unreadable - subtitles stay unavailable, not fatal.
+          }
+        }
+        startProcessing(
+          {
+            name: postUrl.split('/').pop() ?? 'TikTok video',
+            uri: downloaded.videoPath,
+          },
+          postUrl,
+          parsedSubtitles,
+        );
+      } catch (err: unknown) {
+        const reason = err instanceof Error ? err.message : String(err);
+        setRetrieving(false);
+        setMessage(
+          `Could not download from the link. ${reason} You can pick the ` +
+            'video file yourself below - that route always works.',
+        );
+      }
+    },
+    [startProcessing],
+  );
 
   const onProcessingComplete = useCallback((processed: ProcessedResult) => {
     resultCount.current += 1;
@@ -144,6 +201,7 @@ function App() {
         videoName={video.name}
         videoUri={video.uri}
         sourceUrl={sourceUrl}
+        subtitleText={subtitles?.text ?? null}
         onComplete={onProcessingComplete}
         onCancel={() => setRoute('home')}
       />
@@ -198,11 +256,15 @@ function App() {
               <Pressable
                 accessibilityRole="button"
                 onPress={prepareLink}
+                disabled={retrieving}
                 style={({pressed}) => [
                   styles.primaryButton,
                   pressed && styles.pressedSurface,
+                  retrieving && styles.disabledButton,
                 ]}>
-                <Text style={styles.primaryButtonText}>Prepare link</Text>
+                <Text style={styles.primaryButtonText}>
+                  {retrieving ? 'Downloading video…' : 'Prepare link'}
+                </Text>
               </Pressable>
             </View>
           </View>
@@ -299,6 +361,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
   },
   primaryButtonText: {...type.label, color: colors.white},
+  disabledButton: {opacity: 0.5},
   secondaryButton: {
     alignSelf: 'flex-start',
     borderColor: colors.border,

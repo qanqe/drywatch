@@ -24,8 +24,37 @@ interface DryWatchAudioExtractorNative {
   extractToWav(uri: string): Promise<string>;
 }
 
+interface DryWatchTikTokDownloadNative {
+  downloadVideo(
+    postUrl: string,
+  ): Promise<{videoPath: string; sizeBytes: number; subtitlePath?: string}>;
+}
+
+interface DryWatchOcrNative {
+  extractOnScreenText(
+    uri: string,
+    durationMs: number,
+  ): Promise<{status: string; lines?: string[]}>;
+}
+
+interface DryWatchProcessingControlNative {
+  requestNotificationPermission(): Promise<boolean>;
+  startService(title: string): Promise<boolean>;
+  updateStage(stage: string): Promise<boolean>;
+  stopService(): Promise<boolean>;
+}
+
 const NativeAudio = NativeModules.DryWatchAudioExtractor as
   | DryWatchAudioExtractorNative
+  | undefined;
+const NativeTikTok = NativeModules.DryWatchTikTokDownload as
+  | DryWatchTikTokDownloadNative
+  | undefined;
+const NativeOcr = NativeModules.DryWatchOcr as
+  | DryWatchOcrNative
+  | undefined;
+const NativeProcessingControl = NativeModules.DryWatchProcessingControl as
+  | DryWatchProcessingControlNative
   | undefined;
 
 const NativeShare = NativeModules.DryWatchShareIntent as
@@ -117,4 +146,54 @@ export async function extractAudioToWav(uri: string): Promise<string> {
     );
   }
   return NativeAudio.extractToWav(uri);
+}
+
+export async function downloadTikTokVideo(
+  postUrl: string,
+): Promise<{videoPath: string; sizeBytes: number; subtitlePath?: string}> {
+  if (!NativeTikTok) {
+    throw new Error('TikTok download module is unavailable on this platform.');
+  }
+  return NativeTikTok.downloadVideo(postUrl);
+}
+
+export interface OcrResult {
+  status: 'ok' | 'no_frames' | 'no_text';
+  lines: string[];
+}
+
+export async function extractOnScreenText(
+  uri: string,
+  durationMs: number,
+): Promise<OcrResult> {
+  if (!NativeOcr) {
+    throw new Error('OCR module is unavailable on this platform.');
+  }
+  const raw = await NativeOcr.extractOnScreenText(uri, durationMs);
+  return {
+    status: raw.status as OcrResult['status'],
+    lines: raw.lines ?? [],
+  };
+}
+
+export async function startProcessingService(title: string): Promise<boolean> {
+  if (!NativeProcessingControl) {
+    return false;
+  }
+  await NativeProcessingControl.requestNotificationPermission();
+  return NativeProcessingControl.startService(title);
+}
+
+export async function updateProcessingStage(stage: string): Promise<void> {
+  if (!NativeProcessingControl) {
+    return;
+  }
+  await NativeProcessingControl.updateStage(stage);
+}
+
+export async function stopProcessingService(): Promise<void> {
+  if (!NativeProcessingControl) {
+    return;
+  }
+  await NativeProcessingControl.stopService();
 }
