@@ -44,6 +44,23 @@ interface DryWatchProcessingControlNative {
   stopService(): Promise<boolean>;
 }
 
+interface DryWatchAppShareNative {
+  shareFileTo(
+    target: string,
+    filePath: string,
+  ): Promise<{mode: 'direct' | 'chooser'; app?: string}>;
+}
+
+interface DryWatchWebViewExtractNative {
+  extractPostData(postUrl: string): Promise<{
+    videoUrl: string;
+    caption: string;
+    author: string;
+    durationSeconds: number;
+    videoId: string;
+  }>;
+}
+
 const NativeAudio = NativeModules.DryWatchAudioExtractor as
   | DryWatchAudioExtractorNative
   | undefined;
@@ -55,6 +72,12 @@ const NativeOcr = NativeModules.DryWatchOcr as
   | undefined;
 const NativeProcessingControl = NativeModules.DryWatchProcessingControl as
   | DryWatchProcessingControlNative
+  | undefined;
+const NativeAppShare = NativeModules.DryWatchAppShare as
+  | DryWatchAppShareNative
+  | undefined;
+const NativeWebViewExtract = NativeModules.DryWatchWebViewExtract as
+  | DryWatchWebViewExtractNative
   | undefined;
 
 const NativeShare = NativeModules.DryWatchShareIntent as
@@ -196,4 +219,73 @@ export async function stopProcessingService(): Promise<void> {
     return;
   }
   await NativeProcessingControl.stopService();
+}
+
+export async function shareFileToApp(
+  target: string,
+  filePath: string,
+): Promise<{mode: 'direct' | 'chooser'; app?: string}> {
+  if (!NativeAppShare) {
+    throw new Error('App share module is unavailable on this platform.');
+  }
+  return NativeAppShare.shareFileTo(target, filePath);
+}
+
+export interface WebViewExtractResult {
+  videoUrl: string;
+  caption: string;
+  author: string;
+  durationSeconds: number;
+  videoId: string;
+}
+
+export async function extractPostViaWebView(
+  postUrl: string,
+): Promise<WebViewExtractResult> {
+  if (!NativeWebViewExtract) {
+    throw new Error('WebView extraction module is unavailable on this platform.');
+  }
+  return NativeWebViewExtract.extractPostData(postUrl);
+}
+
+/**
+ * Download a video file from a direct URL (TikTok CDN playAddr) into app
+ * cache. CDN downloads are not TLS-fingerprint gated; the Referer header
+ * is required (verified during the retrieval spike).
+ */
+export async function downloadVideoFromUrl(
+  videoUrl: string,
+  onProgress?: (percent: number) => void,
+): Promise<{videoPath: string; sizeBytes: number}> {
+  const RNFS = require('react-native-fs').default;
+  const dir = `${RNFS.CachesDirectoryPath ?? RNFS.DocumentDirectoryPath}/tiktok_downloads`;
+  if (!(await RNFS.exists(dir))) {
+    await RNFS.mkdir(dir);
+  }
+  const dest = `${dir}/webview-${Date.now()}.mp4`;
+  const job = RNFS.downloadFile({
+    fromUrl: videoUrl,
+    toFile: dest,
+    headers: {Referer: 'https://www.tiktok.com/'},
+    progressInterval: 500,
+    progress: (res: {bytesWritten: number; contentLength: number}) => {
+      if (res.contentLength > 0 && onProgress) {
+        onProgress(Math.round((res.bytesWritten / res.contentLength) * 100));
+      }
+    },
+  });
+  const result = await job.promise;
+  if (result.statusCode !== 200) {
+    const exists = await RNFS.exists(dest);
+    if (exists) {
+      await RNFS.unlink(dest);
+    }
+    throw new Error(`Video download failed with HTTP ${result.statusCode}.`);
+  }
+  const stat = await RNFS.stat(dest);
+  if (Number(stat.size) < 100_000) {
+    await RNFS.unlink(dest);
+    throw new Error('Downloaded file is too small to be a video.');
+  }
+  return {videoPath: dest, sizeBytes: Number(stat.size)};
 }

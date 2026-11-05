@@ -1,8 +1,7 @@
 import React, {useEffect, useRef} from 'react';
 import {Animated, Easing, StatusBar, StyleSheet, Text, View} from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
-import {darkColors} from '../design/darkTokens';
-import {fonts, spacing} from '../design/tokens';
+import {colors as darkColors, fonts, spacing} from '../design/tokens';
 
 interface OnboardingProps {
   onContinue: () => void;

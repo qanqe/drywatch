@@ -1,5 +1,4 @@
 import React, {useCallback, useEffect, useRef, useState} from 'react';
-import RNFS from 'react-native-fs';
 import {
   BackHandler,
   Pressable,
@@ -21,16 +20,15 @@ import {colors, type, spacing} from './src/design/tokens';
 import {
   consumePendingShare,
   downloadTikTokVideo,
+  downloadVideoFromUrl,
+  extractPostViaWebView,
   type VideoMeta,
 } from './src/native/drywatch';
-import {parseVtt, formatCueTime} from './src/context/vtt';
 import ProcessingScreen from './src/screens/ProcessingScreen';
 import ResultScreen from './src/screens/ResultScreen';
 import OnboardingScreen from './src/screens/OnboardingScreen';
 
 type Route = 'home' | 'processing' | 'result';
-
-const ONBOARDING_FLAG = 'drywatch-onboarding-seen';
 
 interface PickedVideo {
   name: string;
@@ -55,35 +53,10 @@ function App() {
   const [result, setResult] = useState<ProcessedResult | null>(null);
   const [retrieving, setRetrieving] = useState(false);
   const [subtitles, setSubtitles] = useState<SubtitleContent | null>(null);
-  const [showOnboarding, setShowOnboarding] = useState<boolean | null>(null);
+  // Launch splash plays on EVERY cold start (TikTok/YouTube style).
+  // null = splash running; false = done, show the app.
+  const [splashDone, setSplashDone] = useState(false);
   const resultCount = useRef(0);
-
-  // First session: show onboarding once, flag it in app documents storage.
-  useEffect(() => {
-    const checkOnboarding = async () => {
-      try {
-        const flagPath = `${RNFS.DocumentDirectoryPath}/${ONBOARDING_FLAG}`;
-        const seen = await RNFS.exists(flagPath);
-        setShowOnboarding(!seen);
-      } catch {
-        setShowOnboarding(false); // storage failure: skip onboarding, not break
-      }
-    };
-    checkOnboarding();
-  }, []);
-
-  const completeOnboarding = useCallback(async () => {
-    setShowOnboarding(false);
-    try {
-      await RNFS.writeFile(
-        `${RNFS.DocumentDirectoryPath}/${ONBOARDING_FLAG}`,
-        'seen',
-        'utf8',
-      );
-    } catch {
-      // Flag write failed: onboarding may show again next launch. Non-fatal.
-    }
-  }, []);
 
   // Poll for a TikTok link shared into the app (share sheet, cold or warm).
   useEffect(() => {
@@ -167,33 +140,39 @@ function App() {
       setMessage('');
       setRetrieving(true);
       try {
-        const downloaded = await downloadTikTokVideo(postUrl);
-        let parsedSubtitles: SubtitleContent | null = null;
-        if (downloaded.subtitlePath) {
+        // Primary: WebView extraction (real browser fingerprint; the JS
+        // challenge solves itself). Falls back to yt-dlp, then to the
+        // manual route message.
+        let videoPath: string;
+        let videoName: string;
+        try {
+          const extracted = await extractPostViaWebView(postUrl);
+          const downloaded = await downloadVideoFromUrl(extracted.videoUrl);
+          videoPath = downloaded.videoPath;
+          videoName = extracted.videoId
+            ? `${extracted.author || 'tiktok'}-${extracted.videoId}.mp4`
+            : 'TikTok video.mp4';
+        } catch (webviewErr: unknown) {
+          const webviewReason =
+            webviewErr instanceof Error ? webviewErr.message : String(webviewErr);
           try {
-            const vttResponse = await fetch(
-              `file://${downloaded.subtitlePath}`,
-            );
-            const raw = await vttResponse.text();
-            const cues = parseVtt(raw);
-            if (cues.length > 0) {
-              parsedSubtitles = {
-                text: cues
-                  .map(cue => `[${formatCueTime(cue.startSeconds)}] ${cue.text}`)
-                  .join('\n'),
-              };
-            }
+            const downloaded = await downloadTikTokVideo(postUrl);
+            videoPath = downloaded.videoPath;
+            videoName = postUrl.split('/').pop() ?? 'TikTok video';
           } catch {
-            // Subtitle file unreadable - subtitles stay unavailable, not fatal.
+            setRetrieving(false);
+            setMessage(
+              `Could not download from the link. (${webviewReason}) You can ` +
+                'pick the video file yourself below - that route always works.',
+            );
+            return;
           }
         }
+
         startProcessing(
-          {
-            name: postUrl.split('/').pop() ?? 'TikTok video',
-            uri: downloaded.videoPath,
-          },
+          {name: videoName, uri: videoPath},
           postUrl,
-          parsedSubtitles,
+          null,
         );
       } catch (err: unknown) {
         const reason = err instanceof Error ? err.message : String(err);
@@ -251,8 +230,12 @@ function App() {
     );
   }
 
-  if (showOnboarding !== false) {
-    return <OnboardingScreen onContinue={completeOnboarding} />;
+  // Every cold start: splash first (renamed OnboardingScreen component),
+  // then Home. The processing/result routes above are never gated.
+  if (!splashDone) {
+    return (
+      <OnboardingScreen onContinue={() => setSplashDone(true)} />
+    );
   }
 
   return (

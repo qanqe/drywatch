@@ -1,12 +1,18 @@
 import React, {useState} from 'react';
 import {Pressable, ScrollView, StatusBar, StyleSheet, Text, View} from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
+import {
+  saveDocuments as saveToDocuments,
+  errorCodes as pickerErrorCodes,
+  isErrorWithCode as isPickerErrorWithCode,
+} from '@react-native-documents/picker';
 import {colors, type, spacing} from '../design/tokens';
 import {
   copyToClipboard,
   saveContextFile,
-  shareContextFile,
+  shareFileToApp,
 } from '../native/drywatch';
+import ShareModal, {type ShareTarget} from './ShareModal';
 
 export interface ResultProps {
   videoName: string;
@@ -18,6 +24,7 @@ type Feedback = {kind: 'ok' | 'error'; text: string} | null;
 
 function Result({videoName, document, onDone}: ResultProps) {
   const [feedback, setFeedback] = useState<Feedback>(null);
+  const [shareOpen, setShareOpen] = useState(false);
 
   const runAction = async (
     label: string,
@@ -27,10 +34,58 @@ function Result({videoName, document, onDone}: ResultProps) {
       await action();
       setFeedback({kind: 'ok', text: `${label}.`});
     } catch (err: unknown) {
+      if (
+        isPickerErrorWithCode(err) &&
+        err.code === pickerErrorCodes.OPERATION_CANCELED
+      ) {
+        return; // user closed the save dialog; not an error
+      }
       const message = err instanceof Error ? err.message : String(err);
       setFeedback({kind: 'error', text: `${label} failed: ${message}`});
     }
   };
+
+  // Share modal flow: stage the note in cache once, then each target
+  // shares the same staged file. Copy works directly without the modal.
+  const shareViaModal = (target: ShareTarget) => {
+    setShareOpen(false);
+    if (target === 'copy') {
+      runAction('Copied', () => copyToClipboard(document));
+      return;
+    }
+    runAction('Share started', async () => {
+      try {
+        const cachePath = await saveContextFile(videoName, document);
+        const result = await shareFileToApp(target, cachePath);
+        return result.mode;
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (message.includes('APP_NOT_INSTALLED') || message.includes('not installed')) {
+          // Re-throw with user-facing wording; runAction prints it.
+          throw new Error(
+            'That AI app is not installed on this phone. Use Copy text or Others instead.',
+          );
+        }
+        throw err;
+      }
+    });
+  };
+
+  // Save via the system save-as dialog: stage the note in cache, then let
+  // the user pick a visible location (Documents, Downloads, Drive...).
+  const saveNote = () =>
+    runAction('Saved to your chosen location', async () => {
+      const cachePath = await saveContextFile(videoName, document);
+      const [saved] = await saveToDocuments({
+        sourceUris: [`file://${cachePath}`],
+        mimeType: 'text/markdown',
+        fileName: `${videoName.replace(/[\\/:*?"<>|]/g, '_').slice(0, 60)}.md`,
+      });
+      if (saved.error) {
+        throw new Error(saved.error);
+      }
+      return saved.uri;
+    });
 
   return (
     <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
@@ -76,9 +131,7 @@ function Result({videoName, document, onDone}: ResultProps) {
             </Pressable>
             <Pressable
               accessibilityRole="button"
-              onPress={() =>
-                runAction('Saved', () => saveContextFile(videoName, document))
-              }
+              onPress={saveNote}
               style={({pressed}) => [
                 styles.secondaryButton,
                 pressed && styles.pressedSurface,
@@ -87,23 +140,20 @@ function Result({videoName, document, onDone}: ResultProps) {
             </Pressable>
             <Pressable
               accessibilityRole="button"
-              onPress={() =>
-                runAction('Share sheet opened', () =>
-                  shareContextFile(videoName, document),
-                )
-              }
+              onPress={() => setShareOpen(true)}
               style={({pressed}) => [
-                styles.secondaryButton,
+                styles.primaryButton,
                 pressed && styles.pressedSurface,
               ]}>
-              <Text style={styles.secondaryButtonText}>Share file</Text>
+              <Text style={styles.primaryButtonText}>Share to AI</Text>
             </Pressable>
           </View>
 
           <Text style={styles.note}>
-            Audio transcript is real Whisper output. Sections marked “not
-            extracted” (captions, TikTok subtitles, on-screen text) are wired
-            to their engines in later updates of v0.0.4.
+            Every section keeps its origin separate: the transcript is real
+            on-device Whisper output with timestamps, and sections marked
+            “unavailable” do not exist for this video. Engine coverage
+            improves in upcoming updates.
           </Text>
         </ScrollView>
 
@@ -119,6 +169,12 @@ function Result({videoName, document, onDone}: ResultProps) {
           </Pressable>
         </View>
       </View>
+
+      <ShareModal
+        visible={shareOpen}
+        onClose={() => setShareOpen(false)}
+        onSelect={shareViaModal}
+      />
     </SafeAreaView>
   );
 }

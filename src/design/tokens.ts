@@ -2,25 +2,83 @@
  * DryWatch design tokens — verified against robi.work's shipped CSS (2026-11-02).
  * Single source of truth for color, type, spacing, and radius. Do not hardcode
  * values in screens; import from here.
+ *
+ * Dark is the app default (user decision, 2026-11-04). Light remains available
+ * for an optional future toggle. Both scales come from robi.work's real CSS.
  */
 
-export const colors = {
-  // Core scale (robi.work `--light-*`, converted oklch -> hex)
-  white: '#ffffff', // light-50, background
+export interface ThemeColors {
+  background: string;
+  surfaceTint: string;
+  accent: string; // soft pressed/secondary surface, NOT a vivid accent
+  hairlineSoft: string;
+  pressed: string;
+  border: string;
+  textDisabled: string;
+  textSecondary: string;
+  textMuted: string;
+  text: string;
+  primary: string; // near-black in light, near-white in dark
+  primaryDeep: string;
+  white: string; // text on primary buttons
+  card: string;
+  statusBar: 'light-content' | 'dark-content';
+}
+
+const light: ThemeColors = {
+  background: '#ffffff', // light-50
   surfaceTint: '#f9fbf6', // light-100
-  accent: '#f4f6f2', // light-200 — soft surface color, NOT a vivid accent
+  accent: '#f4f6f2', // light-200
   hairlineSoft: '#ebece8', // light-300
   pressed: '#dcddda', // light-400
   border: '#c8cac7', // light-500
   textDisabled: '#afb1ae', // light-600
   textSecondary: '#929391', // light-700
   textMuted: '#717170', // light-800
-  text: '#4e4e4d', // light-900, body foreground
-  primary: '#363635', // light-1000, near-black primary
+  text: '#4e4e4d', // light-900
+  primary: '#363635', // light-1000
   primaryDeep: '#1f1f1e', // light-1100
-
-  card: '#fdfdfd', // robi.work `--card`
+  white: '#ffffff',
+  card: '#fdfdfd',
+  statusBar: 'dark-content',
 };
+
+const dark: ThemeColors = {
+  background: '#2b312f', // dark-800
+  surfaceTint: '#1a1d1c', // dark-900
+  accent: '#404845', // dark-700
+  hairlineSoft: '#404845', // dark-700
+  pressed: '#404845', // dark-700
+  border: '#77827d', // dark-500
+  textDisabled: '#5a625f',
+  textSecondary: '#a2b0ab', // dark-300
+  textMuted: '#9bb0a9',
+  text: '#eaf2ef', // dark-50
+  primary: '#eaf2ef', // dark-50 — near-white primary on dark
+  primaryDeep: '#ffffff',
+  white: '#2b312f', // text color on primary buttons (dark bg on light text)
+  card: '#242a28',
+  statusBar: 'light-content',
+};
+
+// App-wide theme. Dark is the default; light ships behind a future toggle.
+let current: ThemeColors = dark;
+
+export const theme = {
+  get colors(): ThemeColors {
+    return current;
+  },
+  setMode(mode: 'dark' | 'light') {
+    current = mode === 'light' ? light : dark;
+  },
+};
+
+// Convenience re-export for screens: `colors.background` etc.
+export const colors = new Proxy({} as ThemeColors, {
+  get(_target, prop: string) {
+    return (current as unknown as Record<string, string | 'light-content' | 'dark-content'>)[prop];
+  },
+});
 
 export const fonts = {
   extraLight: 'Lexend-ExtraLight',

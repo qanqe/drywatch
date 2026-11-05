@@ -66,10 +66,17 @@ beforeAll(() => {
 });
 
 test('shows the two ways to start building video context', async () => {
+  jest.useFakeTimers();
   let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
 
   await ReactTestRenderer.act(async () => {
     renderer = ReactTestRenderer.create(<App />);
+  });
+
+  // The launch splash auto-advances after 900ms; advance past it without
+  // flushing the never-ending share-poll interval (runAllTimers would loop).
+  await ReactTestRenderer.act(async () => {
+    jest.advanceTimersByTime(1500);
   });
 
   const text = renderer!.root
@@ -78,6 +85,7 @@ test('shows the two ways to start building video context', async () => {
   expect(text).toContain('A TikTok link');
   expect(text).toContain('A saved video');
   expect(text).toContain('Whisper tiny · on-device');
+  jest.useRealTimers();
 });
 
 test('builds a context document with labeled source sections', async () => {

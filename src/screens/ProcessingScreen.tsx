@@ -50,7 +50,7 @@ function Processing({
     {key: 'read', label: 'Reading video', state: 'active'},
     {key: 'audio', label: 'Extracting audio', state: 'waiting'},
     {key: 'model', label: 'Loading tiny model', state: 'waiting'},
-    {key: 'transcribe', label: 'Whisper spike test', state: 'waiting'},
+    {key: 'transcribe', label: 'Whisper transcription', state: 'waiting'},
     {key: 'ocr', label: 'Reading on-screen text', state: 'waiting'},
     {key: 'build', label: 'Building context document', state: 'waiting'},
   ]);
@@ -132,7 +132,7 @@ function Processing({
           .join('\n');
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
-        setError(`Whisper spike failed: ${message}`);
+        setError(`Transcription failed: ${message}`);
         stopProcessingService().catch(() => {});
         return;
       }
@@ -273,16 +273,16 @@ function Processing({
 
           {transcript ? (
             <Text style={styles.transcript}>
-              Spike transcript ({spikeSeconds !== null ? `${spikeSeconds.toFixed(1)}s` : '…'}):
+              Transcript preview ({spikeSeconds !== null ? `${spikeSeconds.toFixed(1)}s` : '…'}):
               {'\n'}
               {transcript}
             </Text>
           ) : null}
 
           <Text style={styles.note}>
-            The audio transcript is real on-device Whisper output. Caption,
-            TikTok subtitle, and on-screen text extraction is being connected
-            through v0.0.4 updates.
+            The transcript is real on-device Whisper output. Caption, TikTok
+            subtitle, and on-screen text extraction continue to improve in
+            upcoming updates.
           </Text>
         </ScrollView>
 
