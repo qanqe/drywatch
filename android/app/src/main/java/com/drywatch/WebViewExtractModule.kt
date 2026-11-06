@@ -69,6 +69,7 @@ class WebViewExtractModule(private val reactContext: ReactApplicationContext) :
   @SuppressLint("SetJavaScriptEnabled")
   @ReactMethod
   fun extractPostData(postUrl: String, promise: Promise) {
+    android.util.Log.i("DryWatchWebView", "extractPostData called for: $postUrl")
     Thread {
       var timedOut = false
       var extractError: String? = null
@@ -82,10 +83,33 @@ class WebViewExtractModule(private val reactContext: ReactApplicationContext) :
 
         mainHandler.post {
           var webView: WebView? = null
+          var attachedRoot: android.view.ViewGroup? = null
           try {
+            android.util.Log.i("DryWatchWebView", "creating WebView on main thread")
             webView = WebView(reactContext)
+            android.util.Log.i("DryWatchWebView", "WebView created, attaching hidden")
             webView.settings.javaScriptEnabled = true
             webView.settings.domStorageEnabled = true
+            webView.isVerticalScrollBarEnabled = false
+            webView.visibility = android.view.View.INVISIBLE
+
+            // A WebView that is never attached to a window performs no
+            // navigation at all (verified: loadUrl issued, zero navigation
+            // events). Attach it to the foreground activity's root as a 1x1
+            // transparent view at the back so Chromium considers it active.
+            val activity = getCurrentActivity()
+            if (activity != null) {
+              val root = activity.findViewById(android.R.id.content) as? android.view.ViewGroup
+              if (root != null) {
+                webView.layoutParams = android.view.ViewGroup.LayoutParams(1, 1)
+                webView.x = -10f
+                webView.y = -10f
+                root.addView(webView, 0)
+                attachedRoot = root
+                android.util.Log.i("DryWatchWebView", "WebView attached to activity root as 1x1")
+              }
+            }
+
             CookieManager.getInstance().setAcceptCookie(true)
 
             val receiver = ExtractResultReceiver()
@@ -94,7 +118,12 @@ class WebViewExtractModule(private val reactContext: ReactApplicationContext) :
             val pageFinished = arrayOf(false)
             webView.webViewClient = object : WebViewClient() {
               override fun onPageFinished(view: WebView, url: String) {
+                android.util.Log.i("DryWatchWebView", "onPageFinished: $url")
                 synchronized(pageFinished) { pageFinished[0] = true }
+              }
+
+              override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) {
+                android.util.Log.i("DryWatchWebView", "navigated to: $url")
               }
             }
 
@@ -149,8 +178,14 @@ class WebViewExtractModule(private val reactContext: ReactApplicationContext) :
             setupFailed = e
           } finally {
             val wv = webView
+            val root = attachedRoot
             if (wv != null) {
-              mainHandler.post { wv.destroy() }
+              mainHandler.post {
+                try {
+                  root?.removeView(wv)
+                } catch (_: Exception) {}
+                wv.destroy()
+              }
             }
             synchronized(done) { done.notifyAll() }
           }
