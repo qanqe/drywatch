@@ -1,6 +1,8 @@
 package com.drywatch
 
 import android.annotation.SuppressLint
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
@@ -15,27 +17,29 @@ import com.facebook.react.module.annotations.ReactModule
 import org.json.JSONObject
 
 /**
- * WebView-based TikTok extraction spike (v0.0.5).
+ * WebView-based TikTok extraction (v0.0.5).
  *
  * Strategy: a hidden system WebView IS real Chromium, so TikTok sees a genuine
- * browser TLS fingerprint and serves the real page (its JS challenge runs and
- * solves itself, exactly like in a normal browser). After the page finishes
- * loading we read __UNIVERSAL_DATA_FOR_REHYDRATION__ (the hydration JSON that
- * contains playAddr, caption, author) via evaluateJavascript, parse it
- * natively, and return the data to JS.
+ * browser TLS fingerprint and its JS challenge solves itself. After the page
+ * finishes loading we read __UNIVERSAL_DATA_FOR_REHYDRATION__ (the hydration
+ * JSON that contains playAddr, caption, author) via evaluateJavascript, parse
+ * it natively, and return the data to JS.
  *
- * The video file itself is downloaded separately by the JS layer with a
- * plain request plus Referer header (CDN downloads are not fingerprint-
- * gated; verified during the earlier spike).
+ * Threading: WebView must be created and used on Android's main (UI) thread.
+ * Creating it on a background thread crashes with NullPointerException inside
+ * WebViewChromium (verified via logcat on a real device). All WebView calls
+ * therefore run through a main-thread Handler; this method's thread just
+ * waits on the result.
  */
 @ReactModule(name = WebViewExtractModule.NAME)
-class WebViewExtractModule(private val reactContext: ReactApplicationContext) :
+class WebViewExtractModule(reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
 
   companion object {
     const val NAME = "DryWatchWebViewExtract"
     private const val PAGE_TIMEOUT_MS = 25_000L
     private const val SETTLE_MS = 1_500L
+    private const val JS_RESULT_TIMEOUT_MS = 5_000L
   }
 
   override fun getName() = NAME
@@ -60,89 +64,128 @@ class WebViewExtractModule(private val reactContext: ReactApplicationContext) :
 
   private val lock = Object()
   private var receivedJson: String? = null
+  private val mainHandler = Handler(Looper.getMainLooper())
 
   @SuppressLint("SetJavaScriptEnabled")
   @ReactMethod
   fun extractPostData(postUrl: String, promise: Promise) {
     Thread {
-      val webView = WebView(reactContext)
       var timedOut = false
+      var extractError: String? = null
+      var raw: String? = null
+
       try {
-        webView.settings.javaScriptEnabled = true
-        webView.settings.domStorageEnabled = true
-        webView.settings.userAgentString = null // keep genuine WebView UA
-        CookieManager.getInstance().setAcceptCookie(true)
+        // The whole WebView lifecycle must run on the main thread. Park a
+        // signal object here and let the main-thread block fill it.
+        val done = Object()
+        var setupFailed: Exception? = null
 
-        val receiver = ExtractResultReceiver()
-        webView.addJavascriptInterface(receiver, "DryWatchExtract")
+        mainHandler.post {
+          var webView: WebView? = null
+          try {
+            webView = WebView(reactContext)
+            webView.settings.javaScriptEnabled = true
+            webView.settings.domStorageEnabled = true
+            CookieManager.getInstance().setAcceptCookie(true)
 
-        val pageFinished = arrayOf(false)
-        webView.webViewClient = object : WebViewClient() {
-          override fun onPageFinished(view: WebView, url: String) {
-            synchronized(pageFinished) { pageFinished[0] = true }
-          }
-        }
+            val receiver = ExtractResultReceiver()
+            webView.addJavascriptInterface(receiver, "DryWatchExtract")
 
-        webView.loadUrl(postUrl, mapOf(
-          "Accept-Language" to "en-US,en;q=0.9",
-        ))
-
-        // Wait for page load (or timeout).
-        val startedAt = SystemClock.elapsedRealtime()
-        while (SystemClock.elapsedRealtime() - startedAt < PAGE_TIMEOUT_MS) {
-          synchronized(pageFinished) {
-            if (pageFinished[0]) break
-          }
-          SystemClock.sleep(120)
-        }
-        if (!pageFinished[0]) {
-          timedOut = true
-          throw IllegalStateException("Page did not finish loading in time.")
-        }
-
-        // Give TikTok's hydration scripts a moment to populate the JSON.
-        SystemClock.sleep(SETTLE_MS)
-
-        // Read the hydration JSON from the DOM, out to the receiver.
-        receivedJson = null
-        webView.evaluateJavascript(
-          """
-          (function() {
-            var el = document.getElementById('__UNIVERSAL_DATA_FOR_REHYDRATION__');
-            if (el && el.textContent) {
-              window.DryWatchExtract.onUniversalData(el.textContent);
-            } else {
-              window.DryWatchExtract.onNotFound();
+            val pageFinished = arrayOf(false)
+            webView.webViewClient = object : WebViewClient() {
+              override fun onPageFinished(view: WebView, url: String) {
+                synchronized(pageFinished) { pageFinished[0] = true }
+              }
             }
-          })();
-          """.trimIndent(),
-          null,
-        )
 
-        val waitStart = SystemClock.elapsedRealtime()
-        synchronized(lock) {
-          while (receivedJson == null &&
-              SystemClock.elapsedRealtime() - waitStart < 5_000L) {
-            lock.wait(250)
+            webView.loadUrl(postUrl, mapOf(
+              "Accept-Language" to "en-US,en;q=0.9",
+            ))
+
+            // Wait for the page on THIS background thread; WebView itself was
+            // only created and configured on the main thread.
+            val startedAt = SystemClock.elapsedRealtime()
+            while (SystemClock.elapsedRealtime() - startedAt < PAGE_TIMEOUT_MS) {
+              synchronized(pageFinished) {
+                if (pageFinished[0]) break
+              }
+              SystemClock.sleep(120)
+            }
+            if (!pageFinished[0]) {
+              throw IllegalStateException("Page did not finish loading in time.")
+            }
+
+            SystemClock.sleep(SETTLE_MS)
+
+            receivedJson = null
+            webView.evaluateJavascript(
+              """
+              (function() {
+                var el = document.getElementById('__UNIVERSAL_DATA_FOR_REHYDRATION__');
+                if (el && el.textContent) {
+                  window.DryWatchExtract.onUniversalData(el.textContent);
+                } else {
+                  window.DryWatchExtract.onNotFound();
+                }
+              })();
+              """.trimIndent(),
+              null,
+            )
+
+            val waitStart = SystemClock.elapsedRealtime()
+            synchronized(lock) {
+              while (receivedJson == null &&
+                  SystemClock.elapsedRealtime() - waitStart < JS_RESULT_TIMEOUT_MS) {
+                lock.wait(250)
+              }
+            }
+            raw = receivedJson
+            if (raw.isNullOrBlank()) {
+              throw IllegalStateException(
+                "TikTok page loaded but no post data was present. Try again.",
+              )
+            }
+          } catch (e: Exception) {
+            setupFailed = e
+          } finally {
+            val wv = webView
+            if (wv != null) {
+              mainHandler.post { wv.destroy() }
+            }
+            synchronized(done) { done.notifyAll() }
           }
         }
 
-        val raw = receivedJson
-        if (raw.isNullOrBlank()) {
-          throw IllegalStateException(
-            "TikTok page loaded but no post data was present. Try again.",
-          )
+        synchronized(done) {
+          while (raw == null && setupFailed == null) {
+            done.wait(500)
+          }
         }
+        setupFailed?.let { throw it }
+        if (raw == null) {
+          throw IllegalStateException("Extraction ended without a result.")
+        }
+      } catch (e: Exception) {
+        extractError = e.message ?: "WebView extraction failed."
+      }
 
-        // Navigate JSON: __DEFAULT_SCOPE__ -> webapp.video-detail -> itemInfo.itemStruct
-        val root = JSONObject(raw)
+      // Back on the background thread: parse and resolve/reject.
+      if (extractError != null) {
+        promise.reject("WEBVIEW_EXTRACT_FAILED", extractError)
+        return@Thread
+      }
+
+      try {
+        val root = JSONObject(raw!!)
         val scope = root.optJSONObject("__DEFAULT_SCOPE__") ?: JSONObject()
         val detail = scope.optJSONObject("webapp.video-detail") ?: JSONObject()
         val statusCode = detail.optInt("statusCode", -1)
         if (statusCode != 0) {
-          throw IllegalStateException(
+          promise.reject(
+            "WEBVIEW_EXTRACT_FAILED",
             "TikTok returned status $statusCode for this post (private, removed, or blocked).",
           )
+          return@Thread
         }
         val item = detail.optJSONObject("itemInfo")
           ?.optJSONObject("itemStruct") ?: JSONObject()
@@ -151,7 +194,11 @@ class WebViewExtractModule(private val reactContext: ReactApplicationContext) :
           .ifBlank { video.optString("downloadAddr", "") }
 
         if (playAddr.isBlank()) {
-          throw IllegalStateException("This post has no downloadable video.")
+          promise.reject(
+            "WEBVIEW_EXTRACT_FAILED",
+            "This post has no downloadable video.",
+          )
+          return@Thread
         }
 
         val map = Arguments.createMap()
@@ -162,12 +209,7 @@ class WebViewExtractModule(private val reactContext: ReactApplicationContext) :
         map.putString("videoId", item.optString("id", ""))
         promise.resolve(map)
       } catch (e: Exception) {
-        val message =
-          if (timedOut) "Page took too long to load. Try again."
-          else e.message ?: "WebView extraction failed."
-        promise.reject("WEBVIEW_EXTRACT_FAILED", message, e)
-      } finally {
-        webView.destroy()
+        promise.reject("WEBVIEW_EXTRACT_FAILED", e.message, e)
       }
     }.start()
   }

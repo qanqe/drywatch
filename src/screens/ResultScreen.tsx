@@ -46,13 +46,9 @@ function Result({videoName, document, onDone}: ResultProps) {
   };
 
   // Share modal flow: stage the note in cache once, then each target
-  // shares the same staged file. Copy works directly without the modal.
+  // shares the same staged file. Copy lives as its own Result button.
   const shareViaModal = (target: ShareTarget) => {
     setShareOpen(false);
-    if (target === 'copy') {
-      runAction('Copied', () => copyToClipboard(document));
-      return;
-    }
     runAction('Share started', async () => {
       try {
         const cachePath = await saveContextFile(videoName, document);
@@ -63,7 +59,7 @@ function Result({videoName, document, onDone}: ResultProps) {
         if (message.includes('APP_NOT_INSTALLED') || message.includes('not installed')) {
           // Re-throw with user-facing wording; runAction prints it.
           throw new Error(
-            'That AI app is not installed on this phone. Use Copy text or Others instead.',
+            'That AI app is not installed on this phone. Use Others instead.',
           );
         }
         throw err;

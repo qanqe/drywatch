@@ -8,7 +8,7 @@ import {
 } from 'react-native';
 import {colors, fonts, spacing, radius} from '../design/tokens';
 
-export type ShareTarget = 'claude' | 'chatgpt' | 'gemini' | 'others' | 'copy';
+export type ShareTarget = 'claude' | 'chatgpt' | 'gemini' | 'others';
 
 interface ShareModalProps {
   visible: boolean;
@@ -21,7 +21,6 @@ const TARGETS: {key: ShareTarget; label: string; hint: string}[] = [
   {key: 'chatgpt', label: 'ChatGPT', hint: 'Attach to a ChatGPT chat'},
   {key: 'gemini', label: 'Gemini', hint: 'Attach to a Gemini chat'},
   {key: 'others', label: 'Others', hint: 'Share to any installed app'},
-  {key: 'copy', label: 'Copy text', hint: 'Copy the note to clipboard'},
 ];
 
 function ShareModal({visible, onClose, onSelect}: ShareModalProps) {
