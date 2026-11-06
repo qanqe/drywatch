@@ -74,37 +74,37 @@ class WebViewExtractModule(private val reactContext: ReactApplicationContext) :
       var timedOut = false
       var extractError: String? = null
       var raw: String? = null
+      var webView: WebView? = null
+      var attachedRoot: android.view.ViewGroup? = null
+      val pageFinished = arrayOf(false)
 
       try {
-        // The whole WebView lifecycle must run on the main thread. Park a
-        // signal object here and let the main-thread block fill it.
-        val done = Object()
-        var setupFailed: Exception? = null
+        // WebView creation and configuration must run on the main thread.
+        // The wait loop below runs on THIS background thread - keeping it on
+        // the main thread starves the looper so WebView callbacks never fire
+        // (verified: zero navigation callbacks while the loop slept).
 
         mainHandler.post {
-          var webView: WebView? = null
-          var attachedRoot: android.view.ViewGroup? = null
           try {
             android.util.Log.i("DryWatchWebView", "creating WebView on main thread")
             webView = WebView(reactContext)
             android.util.Log.i("DryWatchWebView", "WebView created, attaching hidden")
-            webView.settings.javaScriptEnabled = true
-            webView.settings.domStorageEnabled = true
-            webView.isVerticalScrollBarEnabled = false
-            webView.visibility = android.view.View.INVISIBLE
+            val wv = webView!!
+            wv.settings.javaScriptEnabled = true
+            wv.settings.domStorageEnabled = true
+            wv.isVerticalScrollBarEnabled = false
+            wv.visibility = android.view.View.INVISIBLE
 
-            // A WebView that is never attached to a window performs no
-            // navigation at all (verified: loadUrl issued, zero navigation
-            // events). Attach it to the foreground activity's root as a 1x1
-            // transparent view at the back so Chromium considers it active.
+            // Attach so Chromium considers the view live; 1x1 at (-10,-10)
+            // keeps it effectively invisible to the user.
             val activity = getCurrentActivity()
             if (activity != null) {
               val root = activity.findViewById(android.R.id.content) as? android.view.ViewGroup
               if (root != null) {
-                webView.layoutParams = android.view.ViewGroup.LayoutParams(1, 1)
-                webView.x = -10f
-                webView.y = -10f
-                root.addView(webView, 0)
+                wv.layoutParams = android.view.ViewGroup.LayoutParams(1, 1)
+                wv.x = -10f
+                wv.y = -10f
+                root.addView(wv, 0)
                 attachedRoot = root
                 android.util.Log.i("DryWatchWebView", "WebView attached to activity root as 1x1")
               }
@@ -113,10 +113,9 @@ class WebViewExtractModule(private val reactContext: ReactApplicationContext) :
             CookieManager.getInstance().setAcceptCookie(true)
 
             val receiver = ExtractResultReceiver()
-            webView.addJavascriptInterface(receiver, "DryWatchExtract")
+            wv.addJavascriptInterface(receiver, "DryWatchExtract")
 
-            val pageFinished = arrayOf(false)
-            webView.webViewClient = object : WebViewClient() {
+            wv.webViewClient = object : WebViewClient() {
               override fun onPageFinished(view: WebView, url: String) {
                 android.util.Log.i("DryWatchWebView", "onPageFinished: $url")
                 synchronized(pageFinished) { pageFinished[0] = true }
@@ -127,56 +126,17 @@ class WebViewExtractModule(private val reactContext: ReactApplicationContext) :
               }
             }
 
-            webView.loadUrl(postUrl, mapOf(
+            wv.loadUrl(postUrl, mapOf(
               "Accept-Language" to "en-US,en;q=0.9",
             ))
+            android.util.Log.i("DryWatchWebView", "loadUrl issued, releasing main thread")
 
-            // Wait for the page on THIS background thread; WebView itself was
-            // only created and configured on the main thread.
-            val startedAt = SystemClock.elapsedRealtime()
-            while (SystemClock.elapsedRealtime() - startedAt < PAGE_TIMEOUT_MS) {
-              synchronized(pageFinished) {
-                if (pageFinished[0]) break
-              }
-              SystemClock.sleep(120)
-            }
-            if (!pageFinished[0]) {
-              throw IllegalStateException("Page did not finish loading in time.")
-            }
-
-            SystemClock.sleep(SETTLE_MS)
-
-            receivedJson = null
-            webView.evaluateJavascript(
-              """
-              (function() {
-                var el = document.getElementById('__UNIVERSAL_DATA_FOR_REHYDRATION__');
-                if (el && el.textContent) {
-                  window.DryWatchExtract.onUniversalData(el.textContent);
-                } else {
-                  window.DryWatchExtract.onNotFound();
-                }
-              })();
-              """.trimIndent(),
-              null,
-            )
-
-            val waitStart = SystemClock.elapsedRealtime()
-            synchronized(lock) {
-              while (receivedJson == null &&
-                  SystemClock.elapsedRealtime() - waitStart < JS_RESULT_TIMEOUT_MS) {
-                lock.wait(250)
-              }
-            }
-            raw = receivedJson
-            if (raw.isNullOrBlank()) {
-              throw IllegalStateException(
-                "TikTok page loaded but no post data was present. Try again.",
-              )
-            }
+            // IMPORTANT: this mainHandler.post block ENDS here. Everything
+            // below runs on the background thread. A previous version kept
+            // the wait loop inside this block, which blocked the main looper
+            // so onPageFinished/doUpdateVisitedHistory could never fire
+            // (verified: zero navigation callbacks while the loop slept).
           } catch (e: Exception) {
-            setupFailed = e
-          } finally {
             val wv = webView
             val root = attachedRoot
             if (wv != null) {
@@ -187,18 +147,56 @@ class WebViewExtractModule(private val reactContext: ReactApplicationContext) :
                 wv.destroy()
               }
             }
-            synchronized(done) { done.notifyAll() }
+            promise.reject("WEBVIEW_EXTRACT_FAILED", e.message ?: "WebView setup failed.", e)
           }
         }
 
-        synchronized(done) {
-          while (raw == null && setupFailed == null) {
-            done.wait(500)
+        // Background thread: wait for the page. WebView callbacks fire on
+        // the main looper, which is now free to deliver them.
+        val startedAt = SystemClock.elapsedRealtime()
+        while (SystemClock.elapsedRealtime() - startedAt < PAGE_TIMEOUT_MS) {
+          synchronized(pageFinished) {
+            if (pageFinished[0]) break
+          }
+          SystemClock.sleep(120)
+        }
+        if (!pageFinished[0]) {
+          throw IllegalStateException("Page did not finish loading in time.")
+        }
+
+        SystemClock.sleep(SETTLE_MS)
+
+        receivedJson = null
+        // evaluateJavascript must run on the main thread; deliver its result
+        // through the same receiver the JS bridge calls into.
+        mainHandler.post {
+          webView?.evaluateJavascript(
+            """
+            (function() {
+              var el = document.getElementById('__UNIVERSAL_DATA_FOR_REHYDRATION__');
+              if (el && el.textContent) {
+                window.DryWatchExtract.onUniversalData(el.textContent);
+              } else {
+                window.DryWatchExtract.onNotFound();
+              }
+            })();
+            """.trimIndent(),
+            null,
+          )
+        }
+
+        val waitStart = SystemClock.elapsedRealtime()
+        synchronized(lock) {
+          while (receivedJson == null &&
+              SystemClock.elapsedRealtime() - waitStart < JS_RESULT_TIMEOUT_MS) {
+            lock.wait(250)
           }
         }
-        setupFailed?.let { throw it }
-        if (raw == null) {
-          throw IllegalStateException("Extraction ended without a result.")
+        raw = receivedJson
+        if (raw.isNullOrBlank()) {
+          throw IllegalStateException(
+            "TikTok page loaded but no post data was present. Try again.",
+          )
         }
       } catch (e: Exception) {
         extractError = e.message ?: "WebView extraction failed."
