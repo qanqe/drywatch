@@ -17,7 +17,7 @@ import com.facebook.react.module.annotations.ReactModule
  *
  * Direct targeting strategy (fixed after device testing showed the AI apps
  * were not matched): installation is checked with getPackageInfo (reliable),
- * not intent resolution (unreliable — AI apps often do not declare support
+ * not intent resolution (unreliable  --  AI apps often do not declare support
  * for text/markdown ACTION_SEND, so queryIntentActivities returned nothing
  * and every share fell through to the chooser). The share Intent itself uses
  * the widely-accepted text/plain type; recipients read the attached file's
@@ -83,9 +83,10 @@ class AppShareModule(private val reactContext: ReactApplicationContext) :
           // target the app's package explicitly via createChooser with the
           // package set, which Android routes to that app when resolvable.
           val pm = reactContext.packageManager
-          val receiver = pm.queryIntentActivities(share, 0).firstOrNull {
-            it.activityInfo.packageName == installed
-          }
+          val receiver = pm.queryIntentActivities(share, 0)
+            .firstOrNull { resolveInfo ->
+              resolveInfo.activityInfo?.packageName == installed
+            }
           if (receiver != null) {
             share.setClassName(receiver.activityInfo.packageName, receiver.activityInfo.name)
             reactContext.startActivity(share)
@@ -99,7 +100,6 @@ class AppShareModule(private val reactContext: ReactApplicationContext) :
           // intent: open the chooser pre-filtered to the target package.
           val chooser = Intent.createChooser(share, "Share context note")
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-          chooser.putExtra(Intent.EXTRA_EXCLUDE_COMPONENTS, emptyArray())
           reactContext.startActivity(chooser)
           val map: WritableMap = Arguments.createMap()
           map.putString("mode", "chooser_prefiltered")
