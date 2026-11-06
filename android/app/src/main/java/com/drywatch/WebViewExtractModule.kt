@@ -32,7 +32,7 @@ import org.json.JSONObject
  * waits on the result.
  */
 @ReactModule(name = WebViewExtractModule.NAME)
-class WebViewExtractModule(reactContext: ReactApplicationContext) :
+class WebViewExtractModule(private val reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
 
   companion object {
