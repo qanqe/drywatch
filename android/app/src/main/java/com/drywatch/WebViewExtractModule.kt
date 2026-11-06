@@ -37,8 +37,8 @@ class WebViewExtractModule(private val reactContext: ReactApplicationContext) :
 
   companion object {
     const val NAME = "DryWatchWebViewExtract"
-    private const val PAGE_TIMEOUT_MS = 25_000L
-    private const val SETTLE_MS = 1_500L
+    private const val PAGE_TIMEOUT_MS = 30_000L
+    private const val SETTLE_MS = 3_000L
     private const val JS_RESULT_TIMEOUT_MS = 5_000L
   }
 
@@ -116,6 +116,24 @@ class WebViewExtractModule(private val reactContext: ReactApplicationContext) :
             wv.addJavascriptInterface(receiver, "DryWatchExtract")
 
             wv.webViewClient = object : WebViewClient() {
+              // TikTok's web page detects the WebView and tries to hijack
+              // navigation into the installed TikTok app via snssdk1340://
+              // and similar deep links (verified in device logs: the real
+              // page finished, then instantly navigated away to
+              // snssdk1340://aweme/detail/...). Block every non-http(s)
+              // navigation so the page stays put.
+              override fun shouldOverrideUrlLoading(
+                view: WebView,
+                request: android.webkit.WebResourceRequest,
+              ): Boolean {
+                val scheme = request.url.scheme?.lowercase() ?: ""
+                if (scheme == "http" || scheme == "https") {
+                  return false // let the WebView handle web URLs normally
+                }
+                android.util.Log.i("DryWatchWebView", "blocked deep link: ${request.url}")
+                return true
+              }
+
               override fun onPageFinished(view: WebView, url: String) {
                 android.util.Log.i("DryWatchWebView", "onPageFinished: $url")
                 synchronized(pageFinished) { pageFinished[0] = true }
