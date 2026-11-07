@@ -123,7 +123,12 @@ dependencies {
     // unusable here: every version ships multiple AARs that all declare the
     // org.chromium.net namespace, which AGP 9's manifest merger rejects.
     implementation("org.chromium.net:cronet-api:119.6045.31")
-    implementation("com.google.android.gms:play-services-cronet:18.1.1")
+    implementation("com.google.android.gms:play-services-cronet:18.1.1") {
+      // play-services-cronet forces cronet-api 141, which pairs with
+      // cronet-shared 141 (same namespace) and fails AGP 9's manifest
+      // merger. Pin everything to the standalone 119 interfaces AAR.
+      exclude group: "org.chromium.net"
+    }
 
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")
