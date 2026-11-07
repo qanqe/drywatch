@@ -117,6 +117,14 @@ dependencies {
     // On-device OCR for creator-added on-screen text (v0.0.4)
     implementation("com.google.mlkit:text-recognition:16.0.1")
 
+    // On-device Cronet experiment: Chromium network stack for TikTok TLS test.
+    // cronet-api only (interfaces); the implementation comes from Google Play
+    // services at runtime via CronetProviderInstaller. cronet-embedded is
+    // unusable here: every version ships multiple AARs that all declare the
+    // org.chromium.net namespace, which AGP 9's manifest merger rejects.
+    implementation("org.chromium.net:cronet-api:119.6045.31")
+    implementation("com.google.android.gms:play-services-cronet:18.1.1")
+
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")
     } else {

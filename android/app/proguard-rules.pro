@@ -11,3 +11,6 @@
 
 # whisper.rn native module
 -keep class com.rnwhisper.** { *; }
+
+# Cronet native library
+-keep class org.chromium.net.** { *; }
