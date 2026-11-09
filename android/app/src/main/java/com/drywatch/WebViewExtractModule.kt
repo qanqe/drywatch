@@ -232,6 +232,29 @@ class WebViewExtractModule(private val reactContext: ReactApplicationContext) :
         val detail = scope.optJSONObject("webapp.video-detail") ?: JSONObject()
         val statusCode = detail.optInt("statusCode", -1)
         if (statusCode != 0) {
+          // Diagnostic round 2: the WebView receives TikTok's *reflow*
+          // interstitial (key webapp.reflow.video.detail, not
+          // webapp.video-detail). Dump that branch's keys and a snippet so
+          // we can write the correct parser in one pass.
+          val topKeys = root.keys().asSequence().take(8).toList().toString()
+          val scopeKeys = if (scope.length() > 0) scope.keys().asSequence().take(14).toList().toString() else "EMPTY_SCOPE"
+          android.util.Log.i(
+            "DryWatchWebView",
+            "statusCode=$statusCode; topKeys=$topKeys; scopeKeys=$scopeKeys; rawLen=${raw!!.length}",
+          )
+          try {
+            val reflow = scope.optJSONObject("webapp.reflow.video.detail")
+            if (reflow != null) {
+              val reflowKeys = reflow.keys().asSequence().take(25).toList().toString()
+              android.util.Log.i("DryWatchWebView", "reflowKeys=$reflowKeys; reflowLen=${reflow.toString().length}")
+              // Dump the first 1500 chars of the reflow branch, cleaned of
+              // newlines, to see the actual data shape.
+              val snippet = reflow.toString().take(1500).replace("\n", " ")
+              android.util.Log.i("DryWatchWebView", "reflowSnippet=$snippet")
+            } else {
+              android.util.Log.i("DryWatchWebView", "no reflow branch present")
+            }
+          } catch (_: Exception) {}
           promise.reject(
             "WEBVIEW_EXTRACT_FAILED",
             "TikTok returned status $statusCode for this post (private, removed, or blocked).",

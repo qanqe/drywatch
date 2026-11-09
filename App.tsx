@@ -21,6 +21,7 @@ import {
   consumePendingShare,
   downloadTikTokVideo,
   downloadVideoFromUrl,
+  extractPostViaCronet,
   extractPostViaWebView,
   type VideoMeta,
 } from './src/native/drywatch';
@@ -140,13 +141,21 @@ function App() {
       setMessage('');
       setRetrieving(true);
       try {
-        // Primary: WebView extraction (real browser fingerprint; the JS
-        // challenge solves itself). Falls back to yt-dlp, then to the
-        // manual route message.
+        // Cronet is primary: on-device testing showed it gets status 200 from
+        // TikTok while the WebView path gets blocked (status -1) every time.
+        // WebView stays as a fallback in case Cronet's provider is missing.
         let videoPath: string;
         let videoName: string;
         try {
-          const extracted = await extractPostViaWebView(postUrl);
+          let extracted;
+          try {
+            extracted = await extractPostViaCronet(postUrl);
+          } catch (cronetErr: unknown) {
+            const cronetReason =
+              cronetErr instanceof Error ? cronetErr.message : String(cronetErr);
+            console.log(`[extraction] cronet failed: ${cronetReason}`);
+            extracted = await extractPostViaWebView(postUrl);
+          }
           const downloaded = await downloadVideoFromUrl(extracted.videoUrl);
           videoPath = downloaded.videoPath;
           videoName = extracted.videoId
@@ -244,7 +253,7 @@ function App() {
       <View style={styles.column}>
         <View style={styles.header}>
           <Text style={styles.wordmark}>DryWatch</Text>
-          <Text style={styles.version}>v0.0.4</Text>
+          <Text style={styles.version}>v0.0.5</Text>
         </View>
 
         <View style={styles.intro}>
@@ -313,8 +322,8 @@ function App() {
         {message ? <Text style={styles.message}>{message}</Text> : null}
 
         <View style={styles.footer}>
-          <Text style={styles.footerText}>Whisper tiny · on-device</Text>
-          <Text style={styles.footerText}>v0.0.4</Text>
+          <Text style={styles.footerText}>Whisper small · on-device</Text>
+          <Text style={styles.footerText}>v0.0.5</Text>
         </View>
       </View>
     </SafeAreaView>

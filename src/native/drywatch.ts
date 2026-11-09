@@ -59,6 +59,10 @@ interface DryWatchWebViewExtractNative {
     durationSeconds: number;
     videoId: string;
   }>;
+  downloadToFile(
+    url: string,
+    destPath: string,
+  ): Promise<{videoPath: string; sizeBytes: number}>;
 }
 
 const NativeAudio = NativeModules.DryWatchAudioExtractor as
@@ -77,6 +81,9 @@ const NativeAppShare = NativeModules.DryWatchAppShare as
   | DryWatchAppShareNative
   | undefined;
 const NativeWebViewExtract = NativeModules.DryWatchWebViewExtract as
+  | DryWatchWebViewExtractNative
+  | undefined;
+const NativeCronetExtract = NativeModules.DryWatchCronetExtract as
   | DryWatchWebViewExtractNative
   | undefined;
 
@@ -249,6 +256,52 @@ export async function extractPostViaWebView(
 }
 
 /**
+ * Same contract as extractPostViaWebView, but the request goes through
+ * Cronet (backed by Google Play services) instead of a hidden WebView.
+ * Exists to test whether Cronet's TLS fingerprint clears TikTok's
+ * anti-bot gate that the WebView path trips on. Not yet wired into the
+ * pipeline — see compareExtractionPaths.
+ */
+export async function extractPostViaCronet(
+  postUrl: string,
+): Promise<WebViewExtractResult> {
+  if (!NativeCronetExtract) {
+    throw new Error('Cronet extraction module is unavailable on this platform.');
+  }
+  return NativeCronetExtract.extractPostData(postUrl);
+}
+
+export interface ExtractionComparison {
+  webview: {ok: true; result: WebViewExtractResult} | {ok: false; error: string};
+  cronet: {ok: true; result: WebViewExtractResult} | {ok: false; error: string};
+}
+
+/**
+ * Runs both extraction paths against the same URL concurrently and reports
+ * both outcomes without failing. Used to compare them on a real device
+ * before deciding whether Cronet can replace the WebView path.
+ */
+export async function compareExtractionPaths(
+  postUrl: string,
+): Promise<ExtractionComparison> {
+  const settle = async (
+    run: () => Promise<WebViewExtractResult>,
+  ): Promise<{ok: true; result: WebViewExtractResult} | {ok: false; error: string}> => {
+    try {
+      return {ok: true, result: await run()};
+    } catch (e) {
+      return {ok: false, error: e instanceof Error ? e.message : String(e)};
+    }
+  };
+
+  const [webview, cronet] = await Promise.all([
+    settle(() => extractPostViaWebView(postUrl)),
+    settle(() => extractPostViaCronet(postUrl)),
+  ]);
+  return {webview, cronet};
+}
+
+/**
  * Download a video file from a direct URL (TikTok CDN playAddr) into app
  * cache. CDN downloads are not TLS-fingerprint gated; the Referer header
  * is required (verified during the retrieval spike).
@@ -257,35 +310,31 @@ export async function downloadVideoFromUrl(
   videoUrl: string,
   onProgress?: (percent: number) => void,
 ): Promise<{videoPath: string; sizeBytes: number}> {
-  const RNFS = require('react-native-fs').default;
+  const RNFSModule = require('react-native-fs');
+  // Metro/CJS interop differs between debug and release bundles: the module
+  // may land on `.default` or on the namespace object itself.
+  const RNFS = RNFSModule.default ?? RNFSModule;
+  if (!RNFS?.CachesDirectoryPath && !RNFS?.DocumentDirectoryPath) {
+    throw new Error('react-native-fs did not load (no cache/document paths).');
+  }
   const dir = `${RNFS.CachesDirectoryPath ?? RNFS.DocumentDirectoryPath}/tiktok_downloads`;
   if (!(await RNFS.exists(dir))) {
     await RNFS.mkdir(dir);
   }
-  const dest = `${dir}/webview-${Date.now()}.mp4`;
-  const job = RNFS.downloadFile({
-    fromUrl: videoUrl,
-    toFile: dest,
-    headers: {Referer: 'https://www.tiktok.com/'},
-    progressInterval: 500,
-    progress: (res: {bytesWritten: number; contentLength: number}) => {
-      if (res.contentLength > 0 && onProgress) {
-        onProgress(Math.round((res.bytesWritten / res.contentLength) * 100));
-      }
-    },
-  });
-  const result = await job.promise;
-  if (result.statusCode !== 200) {
-    const exists = await RNFS.exists(dest);
-    if (exists) {
-      await RNFS.unlink(dest);
-    }
-    throw new Error(`Video download failed with HTTP ${result.statusCode}.`);
+  const dest = `${dir}/tiktok-${Date.now()}.mp4`;
+
+  // TikTok signs media URLs against the tt_chain_token cookie issued to the
+  // request that minted them, so the download must reuse the Cronet session.
+  // A separate HTTP client (RNFS) has no such cookie and gets HTTP 403.
+  if (!NativeCronetExtract) {
+    throw new Error('Cronet download module is unavailable on this platform.');
   }
-  const stat = await RNFS.stat(dest);
-  if (Number(stat.size) < 100_000) {
-    await RNFS.unlink(dest);
+  onProgress?.(0);
+  const result = await NativeCronetExtract.downloadToFile(videoUrl, dest);
+  if (result.sizeBytes < 100_000) {
+    await RNFS.unlink(dest).catch(() => {});
     throw new Error('Downloaded file is too small to be a video.');
   }
-  return {videoPath: dest, sizeBytes: Number(stat.size)};
+  onProgress?.(100);
+  return {videoPath: result.videoPath, sizeBytes: result.sizeBytes};
 }

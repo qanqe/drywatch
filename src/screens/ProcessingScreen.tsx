@@ -49,7 +49,7 @@ function Processing({
   const [stages, setStages] = useState<StageState[]>([
     {key: 'read', label: 'Reading video', state: 'active'},
     {key: 'audio', label: 'Extracting audio', state: 'waiting'},
-    {key: 'model', label: 'Loading tiny model', state: 'waiting'},
+    {key: 'model', label: 'Loading small model', state: 'waiting'},
     {key: 'transcribe', label: 'Whisper transcription', state: 'waiting'},
     {key: 'ocr', label: 'Reading on-screen text', state: 'waiting'},
     {key: 'build', label: 'Building context document', state: 'waiting'},
@@ -74,7 +74,22 @@ function Processing({
 
     const run = async () => {
       const mark = (key: string, state: StageState['state']) => {
-        setStages(prev => prev.map(s => (s.key === key ? {...s, state} : s)));
+        setStages(prev => {
+          const next = prev.map(s => (s.key === key ? {...s, state} : s));
+          // When a stage finishes, immediately light up the next one so the
+          // list never shows a dead stretch of "waiting" rows (user-reported
+          // UX regression: everything sat at waiting until all at once done).
+          if (state === 'done') {
+            const idx = next.findIndex(s => s.key === key);
+            for (let i = idx + 1; i < next.length; i++) {
+              if (next[i].state === 'waiting') {
+                next[i] = {...next[i], state: 'active'};
+                break;
+              }
+            }
+          }
+          return next;
+        });
         const stage = stagesRef.current.find(s => s.key === key);
         if (stage) {
           const label =
@@ -103,17 +118,17 @@ function Processing({
         return;
       }
 
-      // Spike: real whisper.rn transcription test with the tiny model.
+      // Real whisper.rn transcription with the small model.
       try {
         mark('audio', 'active');
         const wavPath = await extractAudioToWav(videoUri);
         mark('audio', 'done');
 
         mark('model', 'active');
-        const status = await getModelStatus('tiny');
+        const status = await getModelStatus('small');
         const modelPath = status.downloaded
           ? (status.path as string)
-          : await downloadModel('tiny');
+          : await downloadModel('small');
         await loadModel(modelPath);
         mark('model', 'done');
 

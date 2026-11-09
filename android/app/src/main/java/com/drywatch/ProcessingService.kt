@@ -94,6 +94,11 @@ class ProcessingService : Service() {
 
   override fun onDestroy() {
     isRunning = false
+    // Belt-and-braces: if stopService raced the JS bridge or the system
+    // killed the service without a STOP action, the foreground notification
+    // would otherwise survive until force-stop (user-reported).
+    val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    manager.cancel(NOTIFICATION_ID)
     super.onDestroy()
   }
 
