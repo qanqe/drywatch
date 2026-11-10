@@ -386,7 +386,11 @@ class CronetExtractModule(private val reactContext: ReactApplicationContext) :
   @ReactMethod
   fun downloadToFile(url: String, destPath: String, promise: Promise) {
     Thread {
-      try {
+      var lastError: Exception? = null
+      // Mid-transfer connection drops (ERR_CONNECTION_ABORTED) are the dominant
+      // failure mode on flaky networks; retry the whole download with backoff.
+      for (attempt in 1..3) {
+        try {
         val cronet = getEngine(reactContext)
         val target = java.io.File(destPath)
         target.parentFile?.mkdirs()
@@ -463,11 +467,7 @@ class CronetExtractModule(private val reactContext: ReactApplicationContext) :
 
         if (failure != null || !get.get()) {
           target.delete()
-          promise.reject(
-            "CRONET_DOWNLOAD_FAILED",
-            failure?.message ?: "Download did not start.",
-          )
-          return@Thread
+          throw failure ?: IllegalStateException("Download did not start.")
         }
 
         val size = target.length()
@@ -476,9 +476,20 @@ class CronetExtractModule(private val reactContext: ReactApplicationContext) :
         result.putString("videoPath", destPath)
         result.putDouble("sizeBytes", size.toDouble())
         promise.resolve(result)
+        return@Thread
       } catch (e: Exception) {
-        promise.reject("CRONET_DOWNLOAD_FAILED", e.message, e)
+        lastError = e
+        Log.i(TAG, "download attempt $attempt/3 failed: ${e.message}")
+        if (attempt < 3) {
+          Thread.sleep(if (attempt == 1) 1000L else 3000L)
+        }
       }
+      }
+      promise.reject(
+        "CRONET_DOWNLOAD_FAILED",
+        lastError?.message ?: "Download failed.",
+        lastError,
+      )
     }.start()
   }
 
@@ -499,23 +510,30 @@ class CronetExtractModule(private val reactContext: ReactApplicationContext) :
           Log.i(TAG, "warmup failed (continuing): ${e.message}")
         }
 
-        val html = fetch(postUrl, cronet)
-        Log.i(TAG, "DONE bytes=${html.length} hasMarker=${html.contains(MARKER)}")
-
-        val hasApiData = html.contains("id=\"api-data\"")
-        if (!hasApiData && !html.contains(MARKER)) {
-          promise.reject(
-            "CRONET_EXTRACT_FAILED",
-            "Page returned without post data (challenge or block page).",
-          )
-          return@Thread
+        // The block/connection is intermittent (observed 10204 then 0 on
+        // consecutive fetches for the same link), so retry once on failure
+        // before handing over to the WebView fallback.
+        var extracted: com.facebook.react.bridge.WritableMap? = null
+        var lastError: String? = null
+        for (attempt in 1..2) {
+          try {
+            val html = fetch(postUrl, cronet)
+            Log.i(TAG, "DONE(attempt=$attempt) bytes=${html.length} hasMarker=${html.contains(MARKER)}")
+            val hasApiData = html.contains("id=\"api-data\"")
+            if (!hasApiData && !html.contains(MARKER)) {
+              lastError = "Page returned without post data (challenge or block page)."
+              continue
+            }
+            extracted = parseUniversalData(html)
+            if (extracted != null) break
+            lastError = "Rehydration JSON present but video detail missing (reflow or blocked)."
+          } catch (e: Exception) {
+            lastError = e.message
+            Log.i(TAG, "attempt $attempt failed: ${e.message}")
+          }
         }
-        val extracted = parseUniversalData(html)
         if (extracted == null) {
-          promise.reject(
-            "CRONET_EXTRACT_FAILED",
-            "Rehydration JSON present but video detail missing (reflow or blocked).",
-          )
+          promise.reject("CRONET_EXTRACT_FAILED", lastError ?: "Extraction failed.")
           return@Thread
         }
         promise.resolve(extracted)

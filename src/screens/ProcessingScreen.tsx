@@ -324,11 +324,16 @@ const statusColor: Record<StageState['state'], string> = {
   failed: colors.primaryDeep,
 };
 
-function formatSegmentTime(seconds: number): string {
-  const total = Math.floor(seconds);
-  const minutes = Math.floor(total / 60);
-  const rest = total % 60;
-  return `${minutes}:${rest.toString().padStart(2, '0')}`;
+// whisper.rn segment times are whisper.cpp centiseconds (10ms units).
+// Verified empirically: a 135s video's last segment arrived as 12760.
+function formatSegmentTime(centiseconds: number): string {
+  const totalSeconds = Math.floor(centiseconds / 100);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  const centis = Math.floor(centiseconds % 100);
+  return `${minutes}:${seconds.toString().padStart(2, '0')}.${centis
+    .toString()
+    .padStart(2, '0')}`;
 }
 
 const stageStatusStyle = (state: StageState['state']) => ({

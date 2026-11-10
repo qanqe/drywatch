@@ -171,8 +171,9 @@ function App() {
           } catch {
             setRetrieving(false);
             setMessage(
-              `Could not download from the link. (${webviewReason}) You can ` +
-                'pick the video file yourself below - that route always works.',
+              `Could not download from the link. (${webviewReason}) Check ` +
+                'your connection and try again, or pick the video file ' +
+                'yourself below - that route always works.',
             );
             return;
           }

@@ -70,6 +70,11 @@ class AudioExtractorModule(reactContext: ReactApplicationContext) :
         var inputDone = false
         var outputDone = false
         var pcmBytes = 0L
+        // HE-AAC: the extractor track format reports the CORE rate/channels
+        // (e.g. 22.05kHz mono) while the decoder outputs the expanded stream
+        // (44.1kHz stereo). Use the decoder's actual output format once the
+        // codec reports it, or the PCM gets misread at 4x duration.
+        var decoderFormat: MediaFormat? = null
 
         while (!outputDone) {
           if (!inputDone) {
@@ -108,7 +113,7 @@ class AudioExtractorModule(reactContext: ReactApplicationContext) :
                   ?: throw IllegalStateException("Decoder output buffer unavailable")
                 buffer.position(bufferInfo.offset)
                 buffer.limit(bufferInfo.offset + bufferInfo.size)
-                val bytes = copyPcm16Mono(buffer, audioFormat)
+                val bytes = copyPcm16Mono(buffer, decoderFormat ?: audioFormat)
                 output.write(bytes)
                 pcmBytes += bytes.size
               }
@@ -118,7 +123,7 @@ class AudioExtractorModule(reactContext: ReactApplicationContext) :
               }
             }
             outputIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
-              // Decoder output format is accepted; PCM conversion uses its source format.
+              decoderFormat = decoder.getOutputFormat()
             }
           }
         }
