@@ -26,6 +26,7 @@ import {
   type VideoMeta,
 } from './src/native/drywatch';
 import ProcessingScreen from './src/screens/ProcessingScreen';
+import {fetchTikTokSubtitles} from './src/context/subtitles';
 import ResultScreen from './src/screens/ResultScreen';
 import OnboardingScreen from './src/screens/OnboardingScreen';
 
@@ -45,6 +46,12 @@ interface SubtitleContent {
   text: string;
 }
 
+interface ExtractedLinkContext {
+  caption: string;
+  stickers: string[];
+  subtitleInfos: Array<{languageID: string; url: string; format: string}>;
+}
+
 function App() {
   const [route, setRoute] = useState<Route>('home');
   const [link, setLink] = useState('');
@@ -54,6 +61,7 @@ function App() {
   const [result, setResult] = useState<ProcessedResult | null>(null);
   const [retrieving, setRetrieving] = useState(false);
   const [subtitles, setSubtitles] = useState<SubtitleContent | null>(null);
+  const [linkContext, setLinkContext] = useState<ExtractedLinkContext | null>(null);
   // Launch splash plays on EVERY cold start (TikTok/YouTube style).
   // null = splash running; false = done, show the app.
   const [splashDone, setSplashDone] = useState(false);
@@ -77,10 +85,12 @@ function App() {
       picked: PickedVideo,
       url: string | null,
       subtitleContent?: SubtitleContent | null,
+      extracted?: ExtractedLinkContext | null,
     ) => {
       setVideo(picked);
       setSourceUrl(url);
       setSubtitles(subtitleContent ?? null);
+      setLinkContext(extracted ?? null);
       setResult(null);
       setRoute('processing');
     },
@@ -146,6 +156,7 @@ function App() {
         // WebView stays as a fallback in case Cronet's provider is missing.
         let videoPath: string;
         let videoName: string;
+        let extractedContext: ExtractedLinkContext | null = null;
         try {
           let extracted;
           try {
@@ -161,6 +172,28 @@ function App() {
           videoName = extracted.videoId
             ? `${extracted.author || 'tiktok'}-${extracted.videoId}.mp4`
             : 'TikTok video.mp4';
+          // Phase 2 sources ride along with the extraction result.
+          let subtitleText: string | null = null;
+          try {
+            const fetched = await fetchTikTokSubtitles(extracted.subtitleInfos);
+            subtitleText = fetched?.text ?? null;
+          } catch (subErr: unknown) {
+            console.log(
+              `[subtitles] fetch failed: ${subErr instanceof Error ? subErr.message : String(subErr)}`,
+            );
+          }
+          extractedContext = {
+            caption: extracted.caption,
+            stickers: extracted.stickers,
+            subtitleInfos: extracted.subtitleInfos,
+          };
+          startProcessing(
+            {name: videoName, uri: videoPath},
+            postUrl,
+            subtitleText ? {text: subtitleText} : null,
+            extractedContext,
+          );
+          return;
         } catch (webviewErr: unknown) {
           const webviewReason =
             webviewErr instanceof Error ? webviewErr.message : String(webviewErr);
@@ -182,6 +215,7 @@ function App() {
         startProcessing(
           {name: videoName, uri: videoPath},
           postUrl,
+          null,
           null,
         );
       } catch (err: unknown) {
@@ -224,6 +258,8 @@ function App() {
         videoUri={video.uri}
         sourceUrl={sourceUrl}
         subtitleText={subtitles?.text ?? null}
+        caption={linkContext?.caption ?? null}
+        stickerText={linkContext?.stickers ?? []}
         onComplete={onProcessingComplete}
         onCancel={() => setRoute('home')}
       />

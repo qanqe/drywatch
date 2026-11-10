@@ -133,6 +133,37 @@ class CronetExtractModule(private val reactContext: ReactApplicationContext) :
       map.putString("author", item.optJSONObject("author")?.optString("uniqueId", "") ?: "")
       map.putDouble("durationSeconds", video.optDouble("duration", 0.0))
       map.putString("videoId", item.optString("id", ""))
+
+      // Creator-added text overlays (stickerText arrays on the item).
+      val stickers = Arguments.createArray()
+      val stickerContainers = item.optJSONArray("stickersOnItem")
+      if (stickerContainers != null) {
+        for (i in 0 until stickerContainers.length()) {
+          val texts = stickerContainers.optJSONObject(i)?.optJSONArray("stickerText") ?: continue
+          for (j in 0 until texts.length()) {
+            val entry = texts.optString(j, "").trim()
+            if (entry.isNotEmpty()) stickers.pushString(entry)
+          }
+        }
+      }
+      map.putArray("stickers", stickers)
+
+      // Language-tagged subtitle track descriptors; JS decides which to fetch.
+      val subtitles = Arguments.createArray()
+      val subtitleInfos = video.optJSONArray("subtitleInfos")
+      if (subtitleInfos != null) {
+        for (i in 0 until subtitleInfos.length()) {
+          val sub = subtitleInfos.optJSONObject(i) ?: continue
+          val url = sub.optString("url", "").ifBlank { sub.optString("Url", "") }
+          if (url.isBlank()) continue
+          val info = Arguments.createMap()
+          info.putString("languageID", sub.optString("LanguageID", ""))
+          info.putString("url", url)
+          info.putString("format", sub.optString("Format", ""))
+          subtitles.pushMap(info)
+        }
+      }
+      map.putArray("subtitleInfos", subtitles)
       return map
     }
 

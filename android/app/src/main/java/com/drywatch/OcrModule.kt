@@ -2,7 +2,6 @@ package com.drywatch
 
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
-import android.os.SystemClock
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
@@ -22,9 +21,14 @@ class OcrModule(private val reactContext: ReactApplicationContext) :
 
   companion object {
     const val NAME = "DryWatchOcr"
-    private const val SAMPLE_COUNT = 8
+    // Dense sampling: creator subtitles burn one phrase per frame, so 8
+    // sync-frame snapshots missed most of them. ~2 fps catches phrase-level
+    // text; the cap keeps long videos from stalling the pipeline
+    // (300 frames ~= 20-40 s of OCR on a mid-range phone).
+    private const val SAMPLES_PER_SECOND = 2
+    private const val MAX_FRAMES = 300
     private const val MIN_TEXT_LENGTH = 3
-    private const val MAX_LINES = 60
+    private const val MAX_LINES = 200
   }
 
   override fun getName() = NAME
@@ -45,13 +49,16 @@ class OcrModule(private val reactContext: ReactApplicationContext) :
         // Timestamp -> text lines (TreeMap keeps chronological order).
         val frames = TreeMap<Long, MutableSet<String>>()
 
-        for (index in 0 until SAMPLE_COUNT) {
-          val offsetUs =
-            (duration * 1000L * index / SAMPLE_COUNT) +
-              (duration * 1000L / (SAMPLE_COUNT * 2))
+        val targetFrames = (duration / 1000L * SAMPLES_PER_SECOND).toInt()
+        val sampleCount = minOf(MAX_FRAMES, maxOf(1, targetFrames))
+        val stepUs = duration * 1000L / sampleCount
+        for (index in 0 until sampleCount) {
+          // OPTION_CLOSEST decodes the exact requested frame; CLOSEST_SYNC
+          // jumps to keyframes and skips past subtitle frames.
+          val offsetUs = stepUs * index + stepUs / 2
           val bitmap: Bitmap = retriever.getFrameAtTime(
             offsetUs,
-            MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+            MediaMetadataRetriever.OPTION_CLOSEST,
           ) ?: continue
 
           val timestampSeconds = offsetUs / 1_000_000L
@@ -75,7 +82,6 @@ class OcrModule(private val reactContext: ReactApplicationContext) :
           } finally {
             bitmap.recycle()
           }
-          SystemClock.sleep(50)
         }
 
         recognizer.close()

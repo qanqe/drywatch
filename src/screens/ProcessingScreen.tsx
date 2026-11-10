@@ -24,6 +24,8 @@ export interface ProcessingProps {
   videoUri: string;
   sourceUrl: string | null;
   subtitleText: string | null;
+  caption: string | null;
+  stickerText: string[];
   onComplete: (result: {document: string; meta: VideoMeta | null}) => void;
   onCancel: () => void;
 }
@@ -39,6 +41,8 @@ function Processing({
   videoUri,
   sourceUrl,
   subtitleText,
+  caption,
+  stickerText,
   onComplete,
   onCancel,
 }: ProcessingProps) {
@@ -175,7 +179,26 @@ function Processing({
       mark('build', 'active');
 
       const sources: ContextSource[] = [
-        {key: 'caption', label: 'Caption', status: 'not extracted', content: null},
+        caption
+          ? {
+              key: 'caption',
+              label: 'Caption',
+              status: 'extracted',
+              content: caption,
+            }
+          : sourceUrl
+          ? {
+              key: 'caption',
+              label: 'Caption',
+              status: 'unavailable',
+              content: null,
+            }
+          : {
+              key: 'caption',
+              label: 'Caption',
+              status: 'not extracted',
+              content: null,
+            },
         subtitleText
           ? {
               key: 'subtitles',
@@ -202,12 +225,15 @@ function Processing({
           status: transcriptRef.current ? 'extracted' : 'not extracted',
           content: transcriptSegmentsRef.current || transcriptRef.current || null,
         },
-        ocrStatusRef.current === 'extracted'
+        ocrStatusRef.current === 'extracted' || stickerText.length > 0
           ? {
               key: 'onscreen',
               label: 'On-screen text (OCR)',
               status: 'extracted',
-              content: ocrLinesRef.current.join('\n'),
+              content: [
+                ...stickerText.map(text => `${text} [sticker]`),
+                ...ocrLinesRef.current,
+              ].join('\n'),
             }
           : ocrStatusRef.current === 'no_text'
           ? {
@@ -247,7 +273,7 @@ function Processing({
     // subtitleText is read once at mount alongside the other run inputs;
     // re-running on subtitle changes would restart Whisper mid-run.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [videoUri, videoName, sourceUrl, onComplete]);
+  }, [videoUri, videoName, sourceUrl, caption, stickerText, onComplete]);
 
   return (
     <SafeAreaView style={styles.root} edges={['top', 'bottom']}>

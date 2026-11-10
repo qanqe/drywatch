@@ -58,6 +58,8 @@ interface DryWatchWebViewExtractNative {
     author: string;
     durationSeconds: number;
     videoId: string;
+    stickers?: string[];
+    subtitleInfos?: Array<{languageID: string; url: string; format: string}>;
   }>;
   downloadToFile(
     url: string,
@@ -244,6 +246,8 @@ export interface WebViewExtractResult {
   author: string;
   durationSeconds: number;
   videoId: string;
+  stickers: string[];
+  subtitleInfos: Array<{languageID: string; url: string; format: string}>;
 }
 
 export async function extractPostViaWebView(
@@ -252,7 +256,12 @@ export async function extractPostViaWebView(
   if (!NativeWebViewExtract) {
     throw new Error('WebView extraction module is unavailable on this platform.');
   }
-  return NativeWebViewExtract.extractPostData(postUrl);
+  const raw = await NativeWebViewExtract.extractPostData(postUrl);
+  return {
+    ...raw,
+    stickers: raw.stickers ?? [],
+    subtitleInfos: raw.subtitleInfos ?? [],
+  };
 }
 
 /**
@@ -268,7 +277,12 @@ export async function extractPostViaCronet(
   if (!NativeCronetExtract) {
     throw new Error('Cronet extraction module is unavailable on this platform.');
   }
-  return NativeCronetExtract.extractPostData(postUrl);
+  const raw = await NativeCronetExtract.extractPostData(postUrl);
+  return {
+    ...raw,
+    stickers: raw.stickers ?? [],
+    subtitleInfos: raw.subtitleInfos ?? [],
+  };
 }
 
 export interface ExtractionComparison {
