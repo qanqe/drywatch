@@ -60,6 +60,7 @@ interface DryWatchWebViewExtractNative {
     videoId: string;
     stickers?: string[];
     subtitleInfos?: Array<{languageID: string; url: string; format: string}>;
+    sound?: {title: string; authorName: string; isOriginal: boolean};
   }>;
   downloadToFile(
     url: string,
@@ -248,6 +249,7 @@ export interface WebViewExtractResult {
   videoId: string;
   stickers: string[];
   subtitleInfos: Array<{languageID: string; url: string; format: string}>;
+  sound: {title: string; authorName: string; isOriginal: boolean} | null;
 }
 
 export async function extractPostViaWebView(
@@ -261,6 +263,7 @@ export async function extractPostViaWebView(
     ...raw,
     stickers: raw.stickers ?? [],
     subtitleInfos: raw.subtitleInfos ?? [],
+    sound: raw.sound ?? null,
   };
 }
 
@@ -282,6 +285,7 @@ export async function extractPostViaCronet(
     ...raw,
     stickers: raw.stickers ?? [],
     subtitleInfos: raw.subtitleInfos ?? [],
+    sound: raw.sound ?? null,
   };
 }
 

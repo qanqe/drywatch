@@ -312,6 +312,17 @@ class WebViewExtractModule(private val reactContext: ReactApplicationContext) :
           }
         }
         map.putArray("subtitleInfos", subtitles)
+
+        // Sound: title, author, and whether it is the creator's own upload
+        // or a licensed TikTok sound.
+        val music = item.optJSONObject("music")
+        if (music != null) {
+          val sound = Arguments.createMap()
+          sound.putString("title", music.optString("title", ""))
+          sound.putString("authorName", music.optString("authorName", ""))
+          sound.putBoolean("isOriginal", music.optBoolean("original", false))
+          map.putMap("sound", sound)
+        }
         promise.resolve(map)
       } catch (e: Exception) {
         promise.reject("WEBVIEW_EXTRACT_FAILED", e.message, e)

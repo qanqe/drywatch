@@ -26,6 +26,7 @@ export interface ProcessingProps {
   subtitleText: string | null;
   caption: string | null;
   stickerText: string[];
+  sound: {title: string; authorName: string; isOriginal: boolean} | null;
   onComplete: (result: {document: string; meta: VideoMeta | null}) => void;
   onCancel: () => void;
 }
@@ -43,6 +44,7 @@ function Processing({
   subtitleText,
   caption,
   stickerText,
+  sound,
   onComplete,
   onCancel,
 }: ProcessingProps) {
@@ -225,6 +227,21 @@ function Processing({
           status: transcriptRef.current ? 'extracted' : 'not extracted',
           content: transcriptSegmentsRef.current || transcriptRef.current || null,
         },
+        sound
+          ? {
+              key: 'sound',
+              label: 'Sound',
+              status: 'extracted',
+              content:
+                `${sound.title} - ${sound.authorName}` +
+                (sound.isOriginal ? ' (original sound)' : ' (TikTok sound)'),
+            }
+          : {
+              key: 'sound',
+              label: 'Sound',
+              status: 'not extracted',
+              content: null,
+            },
         ocrStatusRef.current === 'extracted' || stickerText.length > 0
           ? {
               key: 'onscreen',

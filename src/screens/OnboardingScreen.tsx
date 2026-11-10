@@ -57,7 +57,7 @@ function Onboarding({onContinue}: OnboardingProps) {
           <Text style={styles.wordmark}>DryWatch</Text>
         </View>
 
-        <Text style={styles.version}>v0.0.5</Text>
+        <Text style={styles.version}>v0.0.6</Text>
       </Animated.View>
     </SafeAreaView>
   );

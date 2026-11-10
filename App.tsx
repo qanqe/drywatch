@@ -50,6 +50,7 @@ interface ExtractedLinkContext {
   caption: string;
   stickers: string[];
   subtitleInfos: Array<{languageID: string; url: string; format: string}>;
+  sound: {title: string; authorName: string; isOriginal: boolean} | null;
 }
 
 function App() {
@@ -186,6 +187,7 @@ function App() {
             caption: extracted.caption,
             stickers: extracted.stickers,
             subtitleInfos: extracted.subtitleInfos,
+            sound: extracted.sound,
           };
           startProcessing(
             {name: videoName, uri: videoPath},
@@ -260,6 +262,7 @@ function App() {
         subtitleText={subtitles?.text ?? null}
         caption={linkContext?.caption ?? null}
         stickerText={linkContext?.stickers ?? []}
+        sound={linkContext?.sound ?? null}
         onComplete={onProcessingComplete}
         onCancel={() => setRoute('home')}
       />
@@ -290,7 +293,7 @@ function App() {
       <View style={styles.column}>
         <View style={styles.header}>
           <Text style={styles.wordmark}>DryWatch</Text>
-          <Text style={styles.version}>v0.0.5</Text>
+          <Text style={styles.version}>v0.0.6</Text>
         </View>
 
         <View style={styles.intro}>
@@ -360,7 +363,7 @@ function App() {
 
         <View style={styles.footer}>
           <Text style={styles.footerText}>Whisper small · on-device</Text>
-          <Text style={styles.footerText}>v0.0.5</Text>
+          <Text style={styles.footerText}>v0.0.6</Text>
         </View>
       </View>
     </SafeAreaView>
