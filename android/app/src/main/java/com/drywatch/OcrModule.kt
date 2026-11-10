@@ -24,7 +24,6 @@ class OcrModule(private val reactContext: ReactApplicationContext) :
     // Speech content comes from Whisper + TikTok subtitles, so OCR only
     // needs enough frames to catch creator-made burned text, not full
     // coverage. ~0.5 fps catches overlays that persist 2+ seconds.
-    private const val SAMPLES_PER_SECOND = 1
     private const val SAMPLE_INTERVAL_DIVISOR = 2
     private const val MAX_FRAMES = 60
     private const val MIN_TEXT_LENGTH = 3
@@ -102,17 +101,17 @@ class OcrModule(private val reactContext: ReactApplicationContext) :
         }
 
         // Collapse near-duplicate lines across frames. ML Kit reads animated
-        // burned-in text slightly differently every frame ("pertormances" vs
-        // "performances"), so exact-match dedup leaks ~100 variants of one
-        // sentence. Group by normalized trigram similarity, then let the
-        // majority spelling of each word win (voting across frames actually
-        // beats any single frame's read).
+        // burned-in text differently every frame ("pertormances" vs
+        // "performances") AND splits the same overlay into different line
+        // groups, so exact-match dedup leaks ~100 variants of one sentence.
+        // Group by fuzzy word-set overlap; keep the longest read as the
+        // representative (fullest capture of the overlay).
         data class LineRead(
-          val text: String,
+          var text: String,
+          var tokens: List<String>,
           var count: Int,
           var firstSeen: Long,
           var lastSeen: Long,
-          val wordVotes: Array<HashMap<String, Int>>,
         )
 
         val groups = ArrayList<LineRead>()
@@ -123,27 +122,23 @@ class OcrModule(private val reactContext: ReactApplicationContext) :
             val normalized = normalizedCache.getOrPut(line) {
               normalizeForSimilarity(line)
             }
-            val words = normalized.split(" ").filter { it.isNotBlank() }
+            val tokens = normalized.split(" ").filter { it.isNotBlank() }
+            if (tokens.isEmpty()) continue
             var matched: LineRead? = null
             for (group in groups) {
-              if (group.wordVotes.size == words.size &&
-                groupVotesSimilarity(group.wordVotes, words) >= SIMILARITY_THRESHOLD
-              ) {
+              if (wordSetSimilarity(group.tokens, tokens) >= SIMILARITY_THRESHOLD) {
                 matched = group
                 break
               }
             }
             if (matched == null) {
-              val votes = Array(words.size) { HashMap<String, Int>() }
-              groups.add(
-                LineRead(line, 1, timestamp, timestamp, votes),
-              )
+              groups.add(LineRead(line, tokens, 1, timestamp, timestamp))
             } else {
               matched.count += 1
               matched.lastSeen = maxOf(matched.lastSeen, timestamp)
-              for (i in words.indices) {
-                val votes = matched.wordVotes[i]
-                votes[words[i]] = (votes[words[i]] ?: 0) + 1
+              if (tokens.size > matched.tokens.size) {
+                matched.text = line
+                matched.tokens = tokens
               }
             }
           }
@@ -158,10 +153,7 @@ class OcrModule(private val reactContext: ReactApplicationContext) :
           .sortedByDescending { it.count }
           .take(MAX_LINES)
           .forEach { group ->
-            val words = group.wordVotes.map { votes ->
-              votes.entries.maxByOrNull { it.value }?.key ?: ""
-            }
-            val text = joinTitleCase(words)
+            val text = group.text.trim()
             val rendered = when {
               group.count > persistentThreshold -> text
               group.count > 1 ->
@@ -193,24 +185,21 @@ class OcrModule(private val reactContext: ReactApplicationContext) :
     ).trim()
 
   /**
-   * Word-position vote similarity: fraction of positions where the group has
-   * already seen a word that is equal or near-equal (1 edit distance) to the
-   * incoming word. Tolerates per-frame OCR jitter without lib dependencies.
+   * Fuzzy token-set overlap: for each token in the smaller set, count it as
+   * a hit if any token in the larger set is equal or within 1 edit. Tolerates
+   * per-frame OCR jitter and line-split variation without dependencies.
    */
-  private fun groupVotesSimilarity(
-    votes: Array<HashMap<String, Int>>,
-    words: List<String>,
-  ): Double {
-    if (votes.isEmpty()) return 0.0
+  private fun wordSetSimilarity(a: List<String>, b: List<String>): Double {
+    val (small, large) = if (a.size <= b.size) a to b else b to a
+    if (small.isEmpty()) return 0.0
     var hits = 0
-    for (i in votes.indices) {
-      val incoming = if (i < words.size) words[i] else continue
-      val known = votes[i].keys.any { known ->
-        known == incoming || levenshtein(known, incoming) <= 1
+    for (token in small) {
+      val known = large.any { candidate ->
+        candidate == token || levenshtein(candidate, token) <= 1
       }
       if (known) hits += 1
     }
-    return hits.toDouble() / votes.size
+    return hits.toDouble() / small.size
   }
 
   private fun levenshtein(a: String, b: String): Int {
@@ -233,16 +222,6 @@ class OcrModule(private val reactContext: ReactApplicationContext) :
     }
     return previous[b.length]
   }
-
-  /** Re-capitalizes the majority-vote words into a readable line. */
-  private fun joinTitleCase(words: List<String>): String =
-    words.filter { it.isNotBlank() }.joinToString(" ") { word ->
-      if (word.length <= 2) {
-        word
-      } else {
-        word.replaceFirstChar { it.uppercase() }
-      }
-    }
 
   private fun formatSeconds(seconds: Long): String {
     val total = seconds.toInt()
