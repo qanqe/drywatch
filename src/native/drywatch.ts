@@ -12,6 +12,7 @@ interface DryWatchVideoMetaNative {
     rotation: string | null;
     hasAudio: boolean;
   }>;
+  getThumbnail(uri: string): Promise<string>;
 }
 
 interface DryWatchClipboardFileNative {
@@ -134,6 +135,17 @@ export async function readVideoMeta(uri: string): Promise<VideoMeta> {
     rotation: raw.rotation ? Number(raw.rotation) : null,
     hasAudio: raw.hasAudio === true,
   };
+}
+
+/**
+ * JPEG thumbnail of the video's opening seconds, written to app cache.
+ * Resolves the absolute file path (prefix with file:// for RN Image).
+ */
+export async function getVideoThumbnail(uri: string): Promise<string> {
+  if (!NativeMeta) {
+    throw new Error('Video metadata module is unavailable on this platform.');
+  }
+  return NativeMeta.getThumbnail(uri);
 }
 
 export function formatDuration(ms: number | null): string {

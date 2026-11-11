@@ -1,10 +1,11 @@
 import React, {useEffect, useRef, useState} from 'react';
-import {Pressable, ScrollView, StatusBar, StyleSheet, Text, View} from 'react-native';
+import {Image, Pressable, ScrollView, StatusBar, StyleSheet, Text, View} from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {colors, type, spacing} from '../design/tokens';
 import {
   extractAudioToWav,
   extractOnScreenText,
+  getVideoThumbnail,
   readVideoMeta,
   showDoneNotification,
   startProcessingService,
@@ -64,6 +65,7 @@ function Processing({
   const [error, setError] = useState('');
   const [transcript, setTranscript] = useState('');
   const [spikeSeconds, setSpikeSeconds] = useState<number | null>(null);
+  const [thumbUri, setThumbUri] = useState<string | null>(null);
   const startedRef = useRef(false);
   const transcriptRef = useRef('');
   const transcriptSecondsRef = useRef<number | null>(null);
@@ -123,6 +125,15 @@ function Processing({
         setError(`Could not read this video: ${message}`);
         mark('read', 'failed');
         return;
+      }
+
+      // Visual feedback that "this is my video": grab a frame for the
+      // preview. Failure is cosmetic only - processing continues.
+      try {
+        const thumb = await getVideoThumbnail(videoUri);
+        setThumbUri(`file://${thumb}`);
+      } catch {
+        // no preview; the stage list still tells the story
       }
 
       // Real whisper.rn transcription with the small model.
@@ -313,6 +324,14 @@ function Processing({
             {videoName}
           </Text>
 
+          {thumbUri ? (
+            <Image
+              source={{uri: thumbUri}}
+              style={styles.preview}
+              resizeMode="cover"
+            />
+          ) : null}
+
           <View style={styles.stageList}>
             {stages.map(stage => (
               <View key={stage.key} style={styles.stageRow}>
@@ -417,6 +436,14 @@ const styles = StyleSheet.create({
     ...type.body,
     color: colors.textMuted,
     marginTop: spacing.md,
+  },
+  preview: {
+    marginTop: spacing.lg,
+    width: '100%',
+    maxWidth: 320,
+    aspectRatio: 9 / 16,
+    borderRadius: 8,
+    backgroundColor: colors.card,
   },
   stageList: {marginTop: spacing.xxl},
   stageRow: {

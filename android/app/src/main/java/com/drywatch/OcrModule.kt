@@ -22,15 +22,16 @@ class OcrModule(private val reactContext: ReactApplicationContext) :
   companion object {
     const val NAME = "DryWatchOcr"
     // Speech content comes from Whisper + TikTok subtitles, so OCR only
-    // needs enough frames to catch creator-made burned text, not full
-    // coverage. ~0.5 fps catches overlays that persist 2+ seconds.
-    private const val SAMPLE_INTERVAL_DIVISOR = 2
-    private const val MAX_FRAMES = 60
+    // needs enough frames to catch creator-made burned text. Ten evenly
+    // spaced reads keep the jitter variants low (every extra frame is
+    // another chance for ML Kit to re-read the same overlay differently).
+    private const val FRAME_COUNT = 10
     private const val MIN_TEXT_LENGTH = 3
     private const val MIN_WORDS = 2
-    private const val MAX_LINES = 40
-    // Lines whose normalized similarity exceeds this are the same text.
-    private const val SIMILARITY_THRESHOLD = 0.75
+    private const val MIN_CANON_LENGTH = 8
+    private const val MAX_LINES = 12
+    // Squashed-character similarity above this means "same overlay".
+    private const val SIMILARITY_THRESHOLD = 0.8
   }
 
   override fun getName() = NAME
@@ -51,8 +52,7 @@ class OcrModule(private val reactContext: ReactApplicationContext) :
         // Timestamp -> text lines (TreeMap keeps chronological order).
         val frames = TreeMap<Long, MutableSet<String>>()
 
-        val targetFrames = (duration / 1000L / SAMPLE_INTERVAL_DIVISOR).toInt()
-        val sampleCount = minOf(MAX_FRAMES, maxOf(1, targetFrames))
+        val sampleCount = FRAME_COUNT
         val stepUs = duration * 1000L / sampleCount
         for (index in 0 until sampleCount) {
           // OPTION_CLOSEST decodes the exact requested frame; CLOSEST_SYNC
@@ -101,44 +101,53 @@ class OcrModule(private val reactContext: ReactApplicationContext) :
         }
 
         // Collapse near-duplicate lines across frames. ML Kit reads animated
-        // burned-in text differently every frame ("pertormances" vs
-        // "performances") AND splits the same overlay into different line
-        // groups, so exact-match dedup leaks ~100 variants of one sentence.
-        // Group by fuzzy word-set overlap; keep the longest read as the
-        // representative (fullest capture of the overlay).
+        // burned-in text differently every frame, so the comparison is done
+        // on a squashed character string (all punctuation/spaces removed),
+        // which swallows space-gluing jitter ("downinvmashistory" vs
+        // "downinvmashistor"). Shorter fragment reads that sit inside a
+        // longer one are absorbed; the longest read represents the group.
         data class LineRead(
           var text: String,
-          var tokens: List<String>,
           var count: Int,
           var firstSeen: Long,
           var lastSeen: Long,
         )
 
         val groups = ArrayList<LineRead>()
-        val normalizedCache = HashMap<String, String>()
+        val canonCache = HashMap<String, String>()
+
+        fun canonOf(raw: String): String =
+          canonCache.getOrPut(raw) {
+            normalizeForSimilarity(raw).replace(Regex("\\s+"), "")
+          }
 
         for ((timestamp, lines) in frames) {
           for (line in lines) {
-            val normalized = normalizedCache.getOrPut(line) {
-              normalizeForSimilarity(line)
-            }
-            val tokens = normalized.split(" ").filter { it.isNotBlank() }
-            if (tokens.isEmpty()) continue
+            val canon = canonOf(line)
+            if (canon.isEmpty()) continue
+            val tokens = normalizeForSimilarity(line)
+              .split(" ").filter { it.isNotBlank() }
             var matched: LineRead? = null
             for (group in groups) {
-              if (wordSetSimilarity(group.tokens, tokens) >= SIMILARITY_THRESHOLD) {
+              val groupCanon = canonOf(group.text)
+              if (canon.contains(groupCanon) || groupCanon.contains(canon)) {
+                matched = group
+                break
+              }
+              val groupTokens = normalizeForSimilarity(group.text)
+                .split(" ").filter { it.isNotBlank() }
+              if (wordSetSimilarity(groupTokens, tokens) >= SIMILARITY_THRESHOLD) {
                 matched = group
                 break
               }
             }
             if (matched == null) {
-              groups.add(LineRead(line, tokens, 1, timestamp, timestamp))
+              groups.add(LineRead(line, 1, timestamp, timestamp))
             } else {
               matched.count += 1
               matched.lastSeen = maxOf(matched.lastSeen, timestamp)
-              if (tokens.size > matched.tokens.size) {
+              if (line.length > matched.text.length) {
                 matched.text = line
-                matched.tokens = tokens
               }
             }
           }
@@ -153,6 +162,10 @@ class OcrModule(private val reactContext: ReactApplicationContext) :
           .sortedByDescending { it.count }
           .take(MAX_LINES)
           .forEach { group ->
+            // Too short to be a real overlay ("tt tm", "ntth"): noise.
+            if (canonOf(group.text).length < MIN_CANON_LENGTH) {
+              return@forEach
+            }
             val text = group.text.trim()
             val rendered = when {
               group.count > persistentThreshold -> text

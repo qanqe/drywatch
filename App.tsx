@@ -27,10 +27,12 @@ import {
 } from './src/native/drywatch';
 import ProcessingScreen from './src/screens/ProcessingScreen';
 import {fetchTikTokSubtitles} from './src/context/subtitles';
+import {addHistoryEntry} from './src/context/history';
 import ResultScreen from './src/screens/ResultScreen';
+import HistoryScreen from './src/screens/HistoryScreen';
 import OnboardingScreen from './src/screens/OnboardingScreen';
 
-type Route = 'home' | 'processing' | 'result';
+type Route = 'home' | 'processing' | 'result' | 'history';
 
 interface PickedVideo {
   name: string;
@@ -232,11 +234,26 @@ function App() {
     [startProcessing],
   );
 
-  const onProcessingComplete = useCallback((processed: ProcessedResult) => {
-    resultCount.current += 1;
-    setResult(processed);
-    setRoute('result');
-  }, []);
+  const onProcessingComplete = useCallback(
+    (processed: ProcessedResult) => {
+      resultCount.current += 1;
+      setResult(processed);
+      setRoute('result');
+      // Persist into history (fire and forget): the entry keeps the raw
+      // document so History can re-open it without reprocessing.
+      if (video) {
+        addHistoryEntry({
+          id: `${Date.now()}-${resultCount.current}`,
+          videoName: video.name,
+          videoUri: video.uri,
+          sourceUrl,
+          document: processed.document,
+          savedAt: Date.now(),
+        }).catch(() => {});
+      }
+    },
+    [video, sourceUrl],
+  );
 
   // Android back button: go back one screen; exit only from home.
   useEffect(() => {
@@ -275,6 +292,20 @@ function App() {
         videoName={video?.name ?? 'video'}
         document={result.document}
         onDone={() => setRoute('home')}
+      />
+    );
+  }
+
+  if (route === 'history') {
+    return (
+      <HistoryScreen
+        onBack={() => setRoute('home')}
+        onOpen={entry => {
+          setVideo({name: entry.videoName, uri: entry.videoUri});
+          setSourceUrl(entry.sourceUrl);
+          setResult({document: entry.document, meta: null});
+          setRoute('result');
+        }}
       />
     );
   }
@@ -354,6 +385,25 @@ function App() {
                   pressed && styles.pressedSurface,
                 ]}>
                 <Text style={styles.secondaryButtonText}>Choose a file</Text>
+              </Pressable>
+            </View>
+          </View>
+          <View style={styles.divider} />
+
+          <View style={styles.row}>
+            <View>
+              <Text style={styles.rowTitle}>Past notes</Text>
+              <Text style={styles.rowDescription}>
+                Reopen anything you have already built.
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => setRoute('history')}
+                style={({pressed}) => [
+                  styles.secondaryButton,
+                  pressed && styles.pressedSurface,
+                ]}>
+                <Text style={styles.secondaryButtonText}>Open history</Text>
               </Pressable>
             </View>
           </View>
