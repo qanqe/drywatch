@@ -1,7 +1,7 @@
 import {NativeModules, Platform} from 'react-native';
 
 interface DryWatchShareIntentNative {
-  consumePendingShare(): Promise<string | null>;
+  consumePendingShare(): Promise<{url: string | null; background: boolean}>;
 }
 
 interface DryWatchVideoMetaNative {
@@ -44,6 +44,7 @@ interface DryWatchProcessingControlNative {
   updateStage(stage: string): Promise<boolean>;
   stopService(): Promise<boolean>;
   showDoneNotification(title: string): Promise<boolean>;
+  showDoneOverlay(title: string): Promise<boolean>;
 }
 
 interface DryWatchAppShareNative {
@@ -110,17 +111,23 @@ export interface VideoMeta {
   hasAudio: boolean;
 }
 
-export async function consumePendingShare(): Promise<string | null> {
+export async function consumePendingShare(): Promise<{
+  url: string | null;
+  background: boolean;
+}> {
   if (Platform.OS !== 'android' || !NativeShare) {
-    return null;
+    return {url: null, background: false};
   }
   const raw = await NativeShare.consumePendingShare();
-  if (!raw) {
-    return null;
+  if (!raw || !raw.url) {
+    return {url: null, background: false};
   }
   // Shares often include the caption text plus the URL; take the first URL.
-  const match = raw.match(/https?:\/\/\S+/);
-  return match ? match[0] : null;
+  const match = raw.url.match(/https?:\/\/\S+/);
+  return {
+    url: match ? match[0] : null,
+    background: raw.background === true,
+  };
 }
 
 export async function readVideoMeta(uri: string): Promise<VideoMeta> {
@@ -253,6 +260,17 @@ export async function showDoneNotification(title: string): Promise<void> {
     return;
   }
   await NativeProcessingControl.showDoneNotification(title);
+}
+
+/**
+ * Small centered card over whatever app is in front (TikTok) when a
+ * background share run finishes. Tap anywhere dismisses.
+ */
+export async function showDoneOverlay(title: string): Promise<void> {
+  if (!NativeProcessingControl) {
+    return;
+  }
+  await NativeProcessingControl.showDoneOverlay(title);
 }
 
 export async function shareFileToApp(

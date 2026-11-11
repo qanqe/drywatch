@@ -23,11 +23,17 @@ import {
   downloadVideoFromUrl,
   extractPostViaCronet,
   extractPostViaWebView,
+  showDoneNotification,
+  showDoneOverlay,
+  startProcessingService,
+  stopProcessingService,
   type VideoMeta,
 } from './src/native/drywatch';
+import {executeShareRun} from './src/context/sharePipeline';
 import ProcessingScreen from './src/screens/ProcessingScreen';
 import {fetchTikTokSubtitles} from './src/context/subtitles';
 import {addHistoryEntry} from './src/context/history';
+import {getVideoThumbnail} from './src/native/drywatch';
 import ResultScreen from './src/screens/ResultScreen';
 import HistoryScreen from './src/screens/HistoryScreen';
 import OnboardingScreen from './src/screens/OnboardingScreen';
@@ -71,16 +77,48 @@ function App() {
   const resultCount = useRef(0);
 
   // Poll for a TikTok link shared into the app (share sheet, cold or warm).
+  // A background share (from TikTok's share sheet) runs the pipeline with
+  // notification-only feedback and never takes over the screen.
   useEffect(() => {
     const interval = setInterval(async () => {
       const shared = await consumePendingShare();
-      if (shared) {
-        setLink(shared);
-        startFromLink(shared);
+      if (!shared.url) {
+        return;
       }
+      if (shared.background) {
+        void runBackgroundShare(shared.url);
+        return;
+      }
+      setLink(shared.url);
+      startFromLink(shared.url);
     }, 700);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Background share: notification-driven, no UI takeover, result lands in
+  // history and a small overlay card is shown when it finishes.
+  const runBackgroundShare = useCallback(async (postUrl: string) => {
+    setMessage('');
+    await startProcessingService('DryWatch').catch(() => {});
+    const state = await executeShareRun(postUrl);
+    await stopProcessingService().catch(() => {});
+    if (state.status === 'done' && state.result) {
+      const name = state.videoName ?? 'TikTok video';
+      await addHistoryEntry({
+        id: `${Date.now()}-bg`,
+        videoName: name,
+        videoUri: '',
+        sourceUrl: postUrl,
+        document: state.result.document,
+        thumbnailPath: state.result.thumbnailPath,
+        savedAt: Date.now(),
+      }).catch(() => {});
+      await showDoneNotification(name).catch(() => {});
+      showDoneOverlay(name).catch(() => {});
+    } else {
+      await showDoneNotification('DryWatch - processing failed').catch(() => {});
+    }
   }, []);
 
   const startProcessing = useCallback(
@@ -240,16 +278,25 @@ function App() {
       setResult(processed);
       setRoute('result');
       // Persist into history (fire and forget): the entry keeps the raw
-      // document so History can re-open it without reprocessing.
+      // document plus a thumbnail so rows are recognisable by sight.
       if (video) {
-        addHistoryEntry({
-          id: `${Date.now()}-${resultCount.current}`,
-          videoName: video.name,
-          videoUri: video.uri,
-          sourceUrl,
-          document: processed.document,
-          savedAt: Date.now(),
-        }).catch(() => {});
+        (async () => {
+          let thumbnailPath: string | null = null;
+          try {
+            thumbnailPath = await getVideoThumbnail(video.uri);
+          } catch {
+            // cosmetic only
+          }
+          await addHistoryEntry({
+            id: `${Date.now()}-${resultCount.current}`,
+            videoName: video.name,
+            videoUri: video.uri,
+            sourceUrl,
+            document: processed.document,
+            thumbnailPath,
+            savedAt: Date.now(),
+          }).catch(() => {});
+        })();
       }
     },
     [video, sourceUrl],
@@ -324,7 +371,17 @@ function App() {
       <View style={styles.column}>
         <View style={styles.header}>
           <Text style={styles.wordmark}>DryWatch</Text>
-          <Text style={styles.version}>v0.0.6</Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="History"
+            onPress={() => setRoute('history')}
+            hitSlop={10}
+            style={({pressed}) => [
+              styles.historyDot,
+              pressed && styles.historyDotPressed,
+            ]}>
+            <Text style={styles.historyDotText}>H</Text>
+          </Pressable>
         </View>
 
         <View style={styles.intro}>
@@ -441,7 +498,18 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.sm,
   },
   wordmark: {...type.heading, color: colors.primary},
-  version: {...type.caption, color: colors.textSecondary},
+  historyDot: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: colors.accent,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.hairlineSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  historyDotPressed: {backgroundColor: colors.pressed},
+  historyDotText: {...type.label, color: colors.textSecondary},
   intro: {marginTop: spacing.xxxl * 1.5},
   title: {...type.display, color: colors.primary},
   subtitle: {

@@ -11,4 +11,13 @@
         <item name="android:windowLightStatusBar">false</item>
     </style>
 
+    <!-- Share trampoline + done overlay: fully invisible activity. -->
+    <style name="TransparentTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:backgroundDimEnabled">false</item>
+    </style>
+
 </resources>

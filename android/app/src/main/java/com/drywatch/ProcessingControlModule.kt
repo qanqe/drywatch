@@ -86,6 +86,16 @@ class ProcessingControlModule(private val reactContext: ReactApplicationContext)
   }
 
   @ReactMethod
+  fun showDoneOverlay(title: String, promise: Promise) {
+    try {
+      DoneOverlayActivity.show(reactContext, title)
+      promise.resolve(true)
+    } catch (e: Exception) {
+      promise.reject("DONE_OVERLAY_FAILED", e.message, e)
+    }
+  }
+
+  @ReactMethod
   fun requestNotificationPermission(promise: Promise) {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
       promise.resolve(true)

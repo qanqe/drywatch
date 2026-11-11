@@ -1,7 +1,6 @@
 import React, {useEffect, useState} from 'react';
 import {
-  Animated,
-  PanResponder,
+  Image,
   Pressable,
   ScrollView,
   StatusBar,
@@ -11,86 +10,48 @@ import {
 } from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {colors, type, spacing} from '../design/tokens';
-import {
-  getHistory,
-  removeHistoryEntry,
-  type HistoryEntry,
-} from '../context/history';
+import {getHistory, type HistoryEntry} from '../context/history';
 
 export interface HistoryProps {
   onBack: () => void;
   onOpen: (entry: HistoryEntry) => void;
 }
 
-const SWIPE_REMOVE_THRESHOLD = -120;
-
 function HistoryRow({
   entry,
   onOpen,
-  onRemove,
 }: {
   entry: HistoryEntry;
   onOpen: () => void;
-  onRemove: () => void;
 }) {
-  const translateX = new Animated.Value(0);
-  const removedRef = React.useRef(false);
-
-  const pan = PanResponder.create({
-    onMoveShouldSetPanResponder: (_e, g) =>
-      Math.abs(g.dx) > 12 && Math.abs(g.dy) < 24,
-    onPanResponderMove: (_e, g) => {
-      if (g.dx < 0) {
-        Animated.timing(translateX, {
-          toValue: Math.max(g.dx, -200),
-          duration: 0,
-          useNativeDriver: true,
-        }).start();
-      }
-    },
-    onPanResponderRelease: (_e, g) => {
-      if (g.dx < SWIPE_REMOVE_THRESHOLD && !removedRef.current) {
-        removedRef.current = true;
-        Animated.timing(translateX, {
-          toValue: -400,
-          duration: 160,
-          useNativeDriver: true,
-        }).start(() => onRemove());
-      } else {
-        Animated.spring(translateX, {
-          toValue: 0,
-          useNativeDriver: true,
-        }).start();
-      }
-    },
-  });
-
   return (
-    <View style={styles.rowWrap}>
-      <View style={styles.removeBehind}>
-        <Text style={styles.removeText}>remove</Text>
+    <Pressable
+      accessibilityRole="button"
+      onPress={onOpen}
+      style={({pressed}) => [styles.row, pressed && styles.pressed]}>
+      <View style={styles.rowText}>
+        <Text style={styles.rowTitle} numberOfLines={1}>
+          {entry.videoName}
+        </Text>
+        <Text style={styles.rowDate}>
+          {new Date(entry.savedAt).toLocaleString()}
+        </Text>
+        {entry.sourceUrl ? (
+          <Text style={styles.rowSource} numberOfLines={1}>
+            {entry.sourceUrl}
+          </Text>
+        ) : null}
       </View>
-      <Animated.View
-        style={[styles.row, {transform: [{translateX}]}]}
-        {...pan.panHandlers}>
-        <Pressable
-          accessibilityRole="button"
-          onPress={onOpen}
-          style={({pressed}) => [styles.rowBody, pressed && styles.pressed]}>
-          <Text style={styles.rowTitle} numberOfLines={1}>
-            {entry.videoName}
-          </Text>
-          <Text style={styles.rowDate}>
-            {new Date(entry.savedAt).toLocaleString()}
-          </Text>
-          {entry.sourceUrl ? (
-            <Text style={styles.rowSource} numberOfLines={1}>
-              {entry.sourceUrl}
-            </Text>
-          ) : null}
-        </Pressable>
-      </Animated.View>
-    </View>
+      {entry.thumbnailPath ? (
+        <Image
+          source={{uri: `file://${entry.thumbnailPath}`}}
+          style={styles.rowThumb}
+          resizeMode="cover"
+        />
+      ) : (
+        <View style={[styles.rowThumb, styles.rowThumbEmpty]} />
+      )}
+    </Pressable>
   );
 }
 
@@ -103,11 +64,6 @@ function History({onBack, onOpen}: HistoryProps) {
       .then(setEntries)
       .finally(() => setLoaded(true));
   }, []);
-
-  const remove = (id: string) => {
-    removeHistoryEntry(id).catch(() => {});
-    setEntries(prev => prev.filter(e => e.id !== id));
-  };
 
   return (
     <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
@@ -135,12 +91,11 @@ function History({onBack, onOpen}: HistoryProps) {
                 key={entry.id}
                 entry={entry}
                 onOpen={() => onOpen(entry)}
-                onRemove={() => remove(entry.id)}
               />
             ))
           )}
           <Text style={styles.note}>
-            Swipe a row left to remove it. Entries live only on this device.
+            Entries live only on this device.
           </Text>
         </ScrollView>
 
@@ -186,34 +141,30 @@ const styles = StyleSheet.create({
   body: {paddingTop: spacing.xl, paddingBottom: spacing.xl},
   title: {...type.display, color: colors.primary},
   empty: {...type.body, color: colors.textMuted, marginTop: spacing.lg},
-  rowWrap: {
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginTop: spacing.md,
-    overflow: 'hidden',
-    borderRadius: 6,
-  },
-  removeBehind: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: colors.primaryDeep,
-    justifyContent: 'center',
-    alignItems: 'flex-end',
-    paddingRight: spacing.lg,
-  },
-  removeText: {...type.label, color: colors.white},
-  row: {backgroundColor: colors.card},
-  rowBody: {
     paddingVertical: spacing.md,
-    paddingHorizontal: spacing.md,
+    paddingHorizontal: spacing.sm,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.hairlineSoft,
   },
   pressed: {backgroundColor: colors.accent},
+  rowText: {flex: 1, marginRight: spacing.md},
   rowTitle: {...type.body, color: colors.text},
   rowDate: {...type.caption, color: colors.textMuted, marginTop: 2},
   rowSource: {...type.caption, color: colors.textSecondary, marginTop: 2},
+  rowThumb: {
+    width: 52,
+    height: 52,
+    borderRadius: 6,
+    backgroundColor: colors.card,
+  },
+  rowThumbEmpty: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.hairlineSoft,
+  },
   note: {
     ...type.caption,
     color: colors.textMuted,

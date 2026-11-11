@@ -46,12 +46,30 @@
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
         </intent-filter>
+      </activity>
+      <!-- TikTok share sheet target: invisible trampoline. Starts the
+           background pipeline and finishes, so the user stays in TikTok. -->
+      <activity
+        android:name=".ShareActivity"
+        android:label="@string/app_name"
+        android:theme="@style/TransparentTheme"
+        android:excludeFromRecents="true"
+        android:noHistory="true"
+        android:exported="true">
         <intent-filter>
             <action android:name="android.intent.action.SEND" />
             <category android:name="android.intent.category.DEFAULT" />
             <data android:mimeType="text/plain" />
         </intent-filter>
       </activity>
+      <!-- Small centered card over the foreground app when a background
+           share run finishes. -->
+      <activity
+        android:name=".DoneOverlayActivity"
+        android:theme="@style/TransparentTheme"
+        android:excludeFromRecents="true"
+        android:noHistory="true"
+        android:exported="false" />
       <service
           android:name=".ProcessingService"
           android:exported="false"
