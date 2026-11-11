@@ -289,7 +289,7 @@ function App() {
 
   return (
     <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle="light-content" />
       <View style={styles.column}>
         <View style={styles.header}>
           <Text style={styles.wordmark}>DryWatch</Text>

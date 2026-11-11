@@ -76,6 +76,16 @@ class ProcessingControlModule(private val reactContext: ReactApplicationContext)
   }
 
   @ReactMethod
+  fun showDoneNotification(title: String, promise: Promise) {
+    try {
+      ProcessingService.showDone(reactContext, title)
+      promise.resolve(true)
+    } catch (e: Exception) {
+      promise.reject("DONE_NOTIFICATION_FAILED", e.message, e)
+    }
+  }
+
+  @ReactMethod
   fun requestNotificationPermission(promise: Promise) {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
       promise.resolve(true)

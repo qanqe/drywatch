@@ -24,6 +24,7 @@ class ProcessingService : Service() {
   companion object {
     const val CHANNEL_ID = "drywatch_processing"
     const val NOTIFICATION_ID = 41
+    const val DONE_NOTIFICATION_ID = 42
 
     const val ACTION_START = "com.drywatch.START_PROCESSING"
     const val ACTION_STOP = "com.drywatch.STOP_PROCESSING"
@@ -53,6 +54,45 @@ class ProcessingService : Service() {
 
     fun stop(context: Context) {
       context.stopService(Intent(context, ProcessingService::class.java))
+    }
+
+    /**
+     * Chrome-downloads-style completion notice: non-ongoing, swipeable,
+     * tapping it opens the app. Posted by JS when the pipeline finishes;
+     * auto-cancels when tapped.
+     */
+    fun showDone(context: Context, title: String) {
+      val manager =
+        context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        manager.createNotificationChannel(
+          NotificationChannel(
+            "drywatch_done",
+            "Finished videos",
+            NotificationManager.IMPORTANCE_DEFAULT,
+          ),
+        )
+      }
+      val openApp = PendingIntent.getActivity(
+        context,
+        0,
+        context.packageManager.getLaunchIntentForPackage(context.packageName),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+      )
+      val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        Notification.Builder(context, "drywatch_done")
+      } else {
+        @Suppress("DEPRECATION")
+        Notification.Builder(context)
+      }
+      val notification = builder
+        .setSmallIcon(R.drawable.ic_stat_drywatch)
+        .setContentTitle(title)
+        .setContentText("Context note ready. Tap to review.")
+        .setAutoCancel(true)
+        .setContentIntent(openApp)
+        .build()
+      manager.notify(DONE_NOTIFICATION_ID, notification)
     }
   }
 
@@ -118,7 +158,7 @@ class ProcessingService : Service() {
       Notification.Builder(this)
     }
     return builder
-      .setSmallIcon(android.R.drawable.ic_media_play)
+      .setSmallIcon(R.drawable.ic_stat_drywatch)
       .setContentTitle(title)
       .setContentText(text)
       .setOngoing(true)

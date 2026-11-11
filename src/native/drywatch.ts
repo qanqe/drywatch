@@ -42,6 +42,7 @@ interface DryWatchProcessingControlNative {
   startService(title: string): Promise<boolean>;
   updateStage(stage: string): Promise<boolean>;
   stopService(): Promise<boolean>;
+  showDoneNotification(title: string): Promise<boolean>;
 }
 
 interface DryWatchAppShareNative {
@@ -229,6 +230,17 @@ export async function stopProcessingService(): Promise<void> {
     return;
   }
   await NativeProcessingControl.stopService();
+}
+
+/**
+ * Chrome-downloads-style completion notice: stays in the tray after the
+ * pipeline finishes, swipeable, tap opens the app.
+ */
+export async function showDoneNotification(title: string): Promise<void> {
+  if (!NativeProcessingControl) {
+    return;
+  }
+  await NativeProcessingControl.showDoneNotification(title);
 }
 
 export async function shareFileToApp(

@@ -6,6 +6,7 @@ import {
   extractAudioToWav,
   extractOnScreenText,
   readVideoMeta,
+  showDoneNotification,
   startProcessingService,
   stopProcessingService,
   updateProcessingStage,
@@ -279,6 +280,8 @@ function Processing({
         prev.map(s => (s.key === 'build' ? {...s, state: 'done'} : s)),
       );
       stopProcessingService().catch(() => {});
+      // Chrome-downloads-style completion notice: the user can swipe it away.
+      showDoneNotification(videoName).catch(() => {});
 
       // Brief pause so the final "done" state is visible before switching.
       setTimeout(() => {
@@ -294,7 +297,7 @@ function Processing({
 
   return (
     <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle="light-content" />
       <View style={styles.column}>
         <View style={styles.header}>
           <Text style={styles.wordmark}>DryWatch</Text>
