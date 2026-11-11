@@ -16,20 +16,15 @@ import {
   isErrorWithCode,
   keepLocalCopy,
 } from '@react-native-documents/picker';
-import {colors, type, spacing} from './src/design/tokens';
+import {colors, type, spacing, wordmark} from './src/design/tokens';
 import {
   consumePendingShare,
   downloadTikTokVideo,
   downloadVideoFromUrl,
   extractPostViaCronet,
   extractPostViaWebView,
-  showDoneNotification,
-  showDoneOverlay,
-  startProcessingService,
-  stopProcessingService,
   type VideoMeta,
 } from './src/native/drywatch';
-import {executeShareRun} from './src/context/sharePipeline';
 import ProcessingScreen from './src/screens/ProcessingScreen';
 import {fetchTikTokSubtitles} from './src/context/subtitles';
 import {addHistoryEntry} from './src/context/history';
@@ -76,17 +71,16 @@ function App() {
   const [splashDone, setSplashDone] = useState(false);
   const resultCount = useRef(0);
 
-  // Poll for a TikTok link shared into the app (share sheet, cold or warm).
-  // A background share (from TikTok's share sheet) runs the pipeline with
-  // notification-only feedback and never takes over the screen.
+  // Poll for a TikTok link shared into the app while the app is already
+  // running in the foreground (warm in-app share). A share delivered via
+  // the share sheet while the app is NOT running is handled entirely by
+  // ShareHeadlessService + the "DryWatchShareTask" headless JS task
+  // (src/context/sharePipeline.ts) - it never reaches this polling loop,
+  // because no Activity is created for that path.
   useEffect(() => {
     const interval = setInterval(async () => {
       const shared = await consumePendingShare();
       if (!shared.url) {
-        return;
-      }
-      if (shared.background) {
-        void runBackgroundShare(shared.url);
         return;
       }
       setLink(shared.url);
@@ -94,31 +88,6 @@ function App() {
     }, 700);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Background share: notification-driven, no UI takeover, result lands in
-  // history and a small overlay card is shown when it finishes.
-  const runBackgroundShare = useCallback(async (postUrl: string) => {
-    setMessage('');
-    await startProcessingService('DryWatch').catch(() => {});
-    const state = await executeShareRun(postUrl);
-    await stopProcessingService().catch(() => {});
-    if (state.status === 'done' && state.result) {
-      const name = state.videoName ?? 'TikTok video';
-      await addHistoryEntry({
-        id: `${Date.now()}-bg`,
-        videoName: name,
-        videoUri: '',
-        sourceUrl: postUrl,
-        document: state.result.document,
-        thumbnailPath: state.result.thumbnailPath,
-        savedAt: Date.now(),
-      }).catch(() => {});
-      await showDoneNotification(name).catch(() => {});
-      showDoneOverlay(name).catch(() => {});
-    } else {
-      await showDoneNotification('DryWatch - processing failed').catch(() => {});
-    }
   }, []);
 
   const startProcessing = useCallback(
@@ -446,24 +415,6 @@ function App() {
             </View>
           </View>
           <View style={styles.divider} />
-
-          <View style={styles.row}>
-            <View>
-              <Text style={styles.rowTitle}>Past notes</Text>
-              <Text style={styles.rowDescription}>
-                Reopen anything you have already built.
-              </Text>
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => setRoute('history')}
-                style={({pressed}) => [
-                  styles.secondaryButton,
-                  pressed && styles.pressedSurface,
-                ]}>
-                <Text style={styles.secondaryButtonText}>Open history</Text>
-              </Pressable>
-            </View>
-          </View>
         </View>
 
         {message ? <Text style={styles.message}>{message}</Text> : null}
@@ -497,11 +448,11 @@ const styles = StyleSheet.create({
     paddingTop: spacing.md,
     paddingBottom: spacing.sm,
   },
-  wordmark: {...type.heading, color: colors.primary},
+  wordmark: {...wordmark, fontSize: 18, color: colors.primary},
   historyDot: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     backgroundColor: colors.accent,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.hairlineSoft,
@@ -509,7 +460,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   historyDotPressed: {backgroundColor: colors.pressed},
-  historyDotText: {...type.label, color: colors.textSecondary},
+  historyDotText: {...type.body, color: colors.textSecondary},
   intro: {marginTop: spacing.xxxl * 1.5},
   title: {...type.display, color: colors.primary},
   subtitle: {

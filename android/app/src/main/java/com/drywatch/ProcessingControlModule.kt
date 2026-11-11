@@ -86,9 +86,9 @@ class ProcessingControlModule(private val reactContext: ReactApplicationContext)
   }
 
   @ReactMethod
-  fun showDoneOverlay(title: String, promise: Promise) {
+  fun showDoneOverlay(title: String, documentText: String, promise: Promise) {
     try {
-      DoneOverlayActivity.show(reactContext, title)
+      DoneOverlayActivity.show(reactContext, title, documentText)
       promise.resolve(true)
     } catch (e: Exception) {
       promise.reject("DONE_OVERLAY_FAILED", e.message, e)

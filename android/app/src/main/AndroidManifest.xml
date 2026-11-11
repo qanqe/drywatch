@@ -74,5 +74,11 @@
           android:name=".ProcessingService"
           android:exported="false"
           android:foregroundServiceType="dataSync" />
+      <!-- Hosts the headless JS task that runs the share-sheet pipeline
+           without any Activity, so the sharing app stays in the foreground. -->
+      <service
+          android:name=".ShareHeadlessService"
+          android:exported="false"
+          android:foregroundServiceType="dataSync" />
     </application>
 </manifest>

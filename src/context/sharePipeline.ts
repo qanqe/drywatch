@@ -1,65 +1,33 @@
-import {runPipeline, type PipelineResult} from './pipeline';
+import {runPipeline} from './pipeline';
+import {addHistoryEntry} from './history';
+import {
+  extractPostViaCronet,
+  extractPostViaWebView,
+  downloadVideoFromUrl,
+  showDoneNotification,
+  showDoneOverlay,
+} from '../native/drywatch';
+import {fetchTikTokSubtitles} from './subtitles';
 
-/**
- * Background share-sheet pipeline state.
- *
- * The share arrives through ShareActivity (native), which stores the URL.
- * When the app's JS context next runs (MainActivity resumes, or the share
- * activity itself starts it), this module picks the URL up and runs the
- * full pipeline with notification-only feedback - no UI takeover.
- *
- * Result is kept here so the done-overlay can show a summary when the user
- * next opens the app, and so the note lands in history automatically.
- */
-export interface ShareRunState {
-  status: 'running' | 'done' | 'failed';
+interface ShareTaskData {
   postUrl: string;
-  videoName?: string;
-  result?: PipelineResult;
-  error?: string;
-  finishedAt?: number;
-}
-
-let current: ShareRunState | null = null;
-let pendingUrl: string | null = null;
-
-export function offerShareRun(postUrl: string): void {
-  // One at a time: a new share while one runs replaces the pending one.
-  pendingUrl = postUrl;
-}
-
-export function peekPendingShare(): string | null {
-  return pendingUrl;
-}
-
-export function takeShareRun(): ShareRunState | null {
-  const state = current;
-  current = null;
-  return state;
-}
-
-export function getShareRunState(): ShareRunState | null {
-  return current;
 }
 
 /**
- * Runs the share pipeline in the background. Resolves when done; callers
- * (the app bootstrap) fire-and-forget this and read state via getShareRunState.
+ * Headless JS task body, registered in index.js as "DryWatchShareTask".
+ * Runs with NO Activity created - started directly by ShareHeadlessService
+ * (android/.../ShareHeadlessService.kt) when the share sheet delivers a
+ * TikTok link. That service is itself foreground and owns the ongoing
+ * "Preparing your note" notification; this function owns the pipeline work
+ * and the completion notification/overlay.
  */
-export async function executeShareRun(
-  postUrl: string,
-): Promise<ShareRunState> {
-  const state: ShareRunState = {status: 'running', postUrl};
-  current = state;
-  try {
-    // Extraction + download (same chain as the in-app link route).
-    const {
-      extractPostViaCronet,
-      extractPostViaWebView,
-      downloadVideoFromUrl,
-    } = require('../native/drywatch');
-    const {fetchTikTokSubtitles} = require('./subtitles');
+export async function runShareHeadlessTask(data: ShareTaskData): Promise<void> {
+  const postUrl = data?.postUrl;
+  if (!postUrl) {
+    return;
+  }
 
+  try {
     let extracted;
     try {
       extracted = await extractPostViaCronet(postUrl);
@@ -89,15 +57,19 @@ export async function executeShareRun(
       sound: extracted.sound,
     });
 
-    state.status = 'done';
-    state.videoName = videoName;
-    state.result = result;
-    state.finishedAt = Date.now();
-    return state;
+    await addHistoryEntry({
+      id: `${Date.now()}-bg`,
+      videoName,
+      videoUri: '',
+      sourceUrl: postUrl,
+      document: result.document,
+      thumbnailPath: result.thumbnailPath,
+      savedAt: Date.now(),
+    }).catch(() => {});
+    await showDoneNotification(videoName).catch(() => {});
+    await showDoneOverlay(videoName, result.document).catch(() => {});
   } catch (err: unknown) {
-    state.status = 'failed';
-    state.error = err instanceof Error ? err.message : String(err);
-    state.finishedAt = Date.now();
-    return state;
+    const reason = err instanceof Error ? err.message : String(err);
+    await showDoneNotification(`Processing failed: ${reason}`).catch(() => {});
   }
 }

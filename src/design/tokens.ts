@@ -90,16 +90,24 @@ export const fonts = {
 };
 
 // robi.work type usage: h1 = 36px extraLight, dominant body = 14px light,
-// secondary = 12px. The wordmark's character (light weight, tight tracking)
-// carries across the scale — user decision 2026-11-11: the Home "DryWatch"
-// treatment IS the app-wide font direction.
+// secondary = 12px, one 20px light emphasis, one 16px regular.
+// 2026-11-11 correction: the earlier attempt pushed light weights into every
+// role and the UI read as skinny. Weights revert to the original scale; the
+// wordmark treatment (light, tight tracking) lives ONLY in the header
+// wordmark style, applied per-screen.
 export const type = {
-  display: {fontSize: 36, lineHeight: 46, fontFamily: fonts.extraLight, letterSpacing: -0.6},
-  title: {fontSize: 20, lineHeight: 30, fontFamily: fonts.light, letterSpacing: -0.3},
-  heading: {fontSize: 16, lineHeight: 26, fontFamily: fonts.light, letterSpacing: -0.2},
-  body: {fontSize: 14, lineHeight: 24, fontFamily: fonts.light},
-  caption: {fontSize: 12, lineHeight: 20, fontFamily: fonts.light},
-  label: {fontSize: 11, lineHeight: 16, fontFamily: fonts.light, letterSpacing: 0.4},
+  display: {fontSize: 36, lineHeight: 44, fontFamily: fonts.extraLight},
+  title: {fontSize: 20, lineHeight: 28, fontFamily: fonts.light},
+  heading: {fontSize: 16, lineHeight: 24, fontFamily: fonts.regular},
+  body: {fontSize: 14, lineHeight: 22, fontFamily: fonts.light},
+  caption: {fontSize: 12, lineHeight: 18, fontFamily: fonts.light},
+  label: {fontSize: 11, lineHeight: 16, fontFamily: fonts.medium},
+};
+
+// The splash wordmark's exact treatment, for the in-app header "DryWatch".
+export const wordmark = {
+  fontFamily: fonts.light,
+  letterSpacing: -0.8,
 };
 
 // robi.work `--radius: .425rem` ≈ 6.8px. RN wants integers.

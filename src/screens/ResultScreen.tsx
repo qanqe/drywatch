@@ -6,7 +6,7 @@ import {
   errorCodes as pickerErrorCodes,
   isErrorWithCode as isPickerErrorWithCode,
 } from '@react-native-documents/picker';
-import {colors, type, spacing} from '../design/tokens';
+import {colors, type, spacing, wordmark} from '../design/tokens';
 import {
   copyToClipboard,
   saveContextFile,
@@ -195,7 +195,7 @@ const styles = StyleSheet.create({
     paddingTop: spacing.md,
     paddingBottom: spacing.sm,
   },
-  wordmark: {...type.heading, color: colors.primary},
+  wordmark: {...wordmark, fontSize: 18, color: colors.primary},
   stage: {...type.label, color: colors.textMuted},
   scroll: {flex: 1},
   scrollContent: {paddingTop: spacing.xl, paddingBottom: spacing.xl},
